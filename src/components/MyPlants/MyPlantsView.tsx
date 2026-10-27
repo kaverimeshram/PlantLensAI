@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { usePlant } from '@/context/PlantContext';
-import { SavedPlant, PlantCategory, HealthSeverity } from '@/types/plant';
+import { SavedPlant } from '@/types/plant';
 import confetti from 'canvas-confetti';
 import {
   Sprout,
@@ -11,19 +11,10 @@ import {
   Droplets,
   Sun,
   MapPin,
-  Calendar,
-  Clock,
-  MoreVertical,
-  CheckCircle2,
   Trash2,
-  Edit2,
-  Image as ImageIcon,
-  FileText,
   Activity,
   X,
   Stethoscope,
-  ChevronRight,
-  Filter,
 } from 'lucide-react';
 
 const LOCATIONS = [
@@ -41,12 +32,9 @@ export const MyPlantsView: React.FC = () => {
   const {
     savedPlants,
     deleteSavedPlant,
-    updateSavedPlant,
     waterPlant,
     addTimelineObservation,
     setActiveTab,
-    startDiagnosisForSpecies,
-    startChatForSpecies,
   } = usePlant();
 
   const [selectedLocation, setSelectedLocation] = useState<string>('All');
@@ -366,7 +354,7 @@ export const MyPlantsView: React.FC = () => {
                     <div className="flex items-center justify-between">
                       <select
                         value={observationType}
-                        onChange={(e) => setObservationType(e.target.value as any)}
+                        onChange={(e) => setObservationType(e.target.value as 'observation' | 'photo' | 'water')}
                         className="p-1.5 rounded-lg border border-[#183D32]/20 text-xs bg-white"
                       >
                         <option value="observation">Growth Observation</option>

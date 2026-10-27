@@ -7,19 +7,12 @@ import { PlantSpecies, PlantCategory } from '@/types/plant';
 import {
   Compass,
   Search,
-  Filter,
-  Leaf,
   Sun,
   Droplets,
   HeartHandshake,
   MessageSquareQuote,
-  Sparkles,
   MapPin,
   ChevronRight,
-  ShieldAlert,
-  TreeDeciduous,
-  Flower2,
-  Sprout,
   X,
 } from 'lucide-react';
 

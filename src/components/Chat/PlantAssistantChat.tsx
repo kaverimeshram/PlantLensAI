@@ -4,16 +4,10 @@ import React, { useState, useRef, useEffect } from 'react';
 import { usePlant } from '@/context/PlantContext';
 import { plantAiService } from '@/services/aiProvider';
 import {
-  MessageSquareQuote,
   X,
   Send,
-  Sparkles,
   Bot,
   User,
-  ShieldAlert,
-  Sprout,
-  HelpCircle,
-  ExternalLink,
 } from 'lucide-react';
 
 const QUICK_SUGGESTIONS = [
@@ -79,7 +73,7 @@ export const PlantAssistantChat: React.FC = () => {
         role: 'assistant',
         content: response.reply,
       });
-    } catch (e) {
+    } catch {
       addChatMessage({
         role: 'assistant',
         content: 'I apologize, but I encountered an issue processing your botanical query. Please try again.',

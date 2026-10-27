@@ -1,12 +1,35 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
+// Helper to convert remote URL or data URL to clean base64 & mimeType
+async function resolveImageBase64(imageStr: string): Promise<{ base64Data: string; mimeType: string }> {
+  if (imageStr.startsWith('data:')) {
+    const parts = imageStr.split(';base64,');
+    const mimeType = parts[0].replace('data:', '') || 'image/jpeg';
+    const base64Data = parts[1] || '';
+    return { base64Data, mimeType };
+  }
+
+  if (imageStr.startsWith('http://') || imageStr.startsWith('https://')) {
+    const res = await fetch(imageStr);
+    if (!res.ok) {
+      throw new Error(`Failed to fetch image from URL: ${res.statusText}`);
+    }
+    const contentType = res.headers.get('content-type') || 'image/jpeg';
+    const arrayBuffer = await res.arrayBuffer();
+    const base64Data = Buffer.from(arrayBuffer).toString('base64');
+    return { base64Data, mimeType: contentType };
+  }
+
+  return { base64Data: imageStr, mimeType: 'image/jpeg' };
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { image, symptoms, answers, additionalImages, userApiKey } = body;
+    const { image, symptoms, answers, userApiKey } = body;
 
-    if (!image) {
+    if (!image || typeof image !== 'string' || image.trim().length === 0) {
       return NextResponse.json({ error: 'Image is required for diagnosis' }, { status: 400 });
     }
 
@@ -14,21 +37,14 @@ export async function POST(req: NextRequest) {
 
     if (apiKey && apiKey.length > 10) {
       try {
+        const { base64Data, mimeType } = await resolveImageBase64(image);
+
         const genAI = new GoogleGenerativeAI(apiKey);
         const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
-        let mimeType = 'image/jpeg';
-        let base64Data = image;
-
-        if (image.includes(';base64,')) {
-          const parts = image.split(';base64,');
-          mimeType = parts[0].replace('data:', '');
-          base64Data = parts[1];
-        }
-
         const symptomsText = symptoms && symptoms.length > 0
           ? `User observed symptoms: ${symptoms.join(', ')}.`
-          : 'User did not specify symptoms; analyze visually.';
+          : 'User did not pre-select symptoms; analyze visually from the image.';
 
         const answersText = answers && Object.keys(answers).length > 0
           ? `User care context: ${JSON.stringify(answers)}.`
@@ -47,6 +63,7 @@ Identify:
 4. Possible causes ranked by likelihood % with visual evidence supporting each
 5. Actionable treatment plan: immediate actions, watering adjustments, light/temp adjustments, soil/drainage recommendations, organic pest management, fertilizer advice (with safety precautions against fertilizer burn), prevention tips, follow-up schedule
 6. 2-3 relevant follow-up questions to refine the diagnosis if needed
+7. If the evidence in the photo is blurry, partial, or insufficient to reach a certain diagnosis, set "insufficientEvidence": true, provide an "insufficientEvidenceReason", and list 2-4 specific items in "neededInformation" (e.g. close-up of leaf undersides, photo of pot drainage holes, check soil 2 inches down).
 
 Return ONLY a valid JSON object matching this schema (do NOT wrap in markdown backticks, just raw JSON):
 {
@@ -90,7 +107,10 @@ Return ONLY a valid JSON object matching this schema (do NOT wrap in markdown ba
       "options": ["Option A", "Option B", "Option C"]
     }
   ],
-  "disclaimer": "Visual AI diagnosis is an advisory tool. Soil pathogens, viral infections, and microclimates may require local physical laboratory testing."
+  "insufficientEvidence": false,
+  "insufficientEvidenceReason": "",
+  "neededInformation": [],
+  "disclaimer": "Visual AI diagnosis is an advisory tool. Soil pathogens, viral infections, and microclimates may require physical laboratory testing."
 }`;
 
         const result = await model.generateContent([
@@ -111,43 +131,78 @@ Return ONLY a valid JSON object matching this schema (do NOT wrap in markdown ba
           diagnosis: {
             ...parsed,
             imageUrl: image,
+            isDemoMode: false,
           },
           isDemoMode: false,
         });
-      } catch (geminiError: any) {
-        console.warn('Gemini diagnose error, falling back to simulated diagnosis:', geminiError?.message || geminiError);
+      } catch (geminiError: unknown) {
+        const errorMsg = geminiError instanceof Error ? geminiError.message : String(geminiError);
+        console.warn('Gemini diagnose error, falling back to simulated diagnosis:', errorMsg);
       }
     }
 
     // High quality demo fallback
     const isOverwater = (answers && (answers['water_frequency']?.includes('Every day') || answers['soil_state']?.includes('Soggy')));
-    const symptomList = symptoms && symptoms.length > 0 ? symptoms : ['Yellowing foliage on lower nodes', 'Dry leaf edges'];
+    const hasYellowing = symptoms && symptoms.some((s: string) => s.toLowerCase().includes('yellow'));
+    const isMildew = image.includes('518709268805') || (symptoms && symptoms.some((s: string) => s.toLowerCase().includes('mildew')));
+    const isSpot = image.includes('592841200221') || (symptoms && symptoms.some((s: string) => s.toLowerCase().includes('spot')));
+
+    let primaryCause = isOverwater ? 'Root Hypoxia / Overwatering Stress' : 'Subtle Moisture Inconsistency & Dry Air Stress';
+    let primaryDesc = isOverwater
+      ? 'Soil stays saturated for too long, depriving delicate root hairs of oxygen and triggering lower leaf chlorosis.'
+      : 'Fluctuating moisture intervals combined with low ambient humidity cause premature cellular collapse in leaf tips.';
+    let visualEvidence = 'Pale yellowing starting on oldest leaves while main veins remain faintly green, with slight tip necrosis.';
+    let healthScore = isOverwater ? 65 : 78;
+    let symptomsList = symptoms && symptoms.length > 0 ? symptoms : ['Yellowing foliage on lower nodes', 'Dry leaf edges'];
+
+    if (isMildew) {
+      primaryCause = 'Powdery Mildew Fungal Infection (*Podosphaera / Erysiphales*)';
+      primaryDesc = 'Airborne fungal spores germinate on foliage during periods of high ambient humidity and low air circulation, spreading a white powdery mycelial layer.';
+      visualEvidence = 'Superficial white powdery talc-like patches on upper leaf surfaces and petioles.';
+      healthScore = 62;
+      symptomsList = ['White Powdery Substance', 'Curling or Cupping Leaves'];
+    } else if (isSpot) {
+      primaryCause = 'Early Leaf Spot / Septoria Fungus (*Septoria lycopersici*)';
+      primaryDesc = 'Fungal water-borne spores splash onto lower foliage from soil, causing circular necrotic lesions that spread upwards.';
+      visualEvidence = 'Circular brown spots with dark concentric margins and yellow halos on lower leaves.';
+      healthScore = 58;
+      symptomsList = ['Dark / Water-soaked Spots', 'Yellowing Leaves'];
+    } else if (hasYellowing) {
+      primaryCause = 'Chlorosis from Root Suffocation / Moisture Excess';
+      primaryDesc = 'Roots submerged in waterlogged potting medium cannot take up oxygen or iron, leading to breakdown of chloroplasts in older basal foliage.';
+      visualEvidence = 'Pronounced uniform yellowing across basal leaves while apical growth remains green.';
+      healthScore = 70;
+    }
 
     return NextResponse.json({
       diagnosis: {
         id: 'diag-' + Date.now(),
         scanDate: new Date().toISOString().split('T')[0],
-        overallHealth: isOverwater ? 'moderate_issue' : 'mild_stress',
-        healthScore: isOverwater ? 65 : 80,
+        overallHealth: healthScore >= 80 ? 'healthy' : healthScore >= 65 ? 'mild_stress' : 'moderate_issue',
+        healthScore,
         plantIdentification: {
-          commonName: 'Foliage Plant (Pothos / Philodendron / Aroid)',
-          scientificName: 'Epipremnum / Philodendron sp.',
+          commonName: isSpot ? 'Tomato Plant' : isMildew ? 'Rose Plant' : 'Indoor Foliage Plant (Pothos / Aroid)',
+          scientificName: isSpot ? 'Solanum lycopersicum' : isMildew ? 'Rosa damascena' : 'Epipremnum aureum',
         },
-        observedSymptoms: symptomList,
+        observedSymptoms: symptomsList,
         possibleCauses: [
           {
-            cause: isOverwater ? 'Root Hypoxia / Overwatering Stress' : 'Subtle Moisture Inconsistency & Dry Air Stress',
+            cause: primaryCause,
             likelihood: 78,
-            description: isOverwater
-              ? 'Soil stays saturated for too long, depriving delicate root hairs of oxygen and triggering lower leaf chlorosis.'
-              : 'Fluctuating moisture intervals combined with low ambient humidity cause premature cellular collapse in leaf tips.',
-            visualEvidence: 'Pale yellowing starting on oldest leaves while main veins remain faintly green, with slight tip necrosis.',
+            description: primaryDesc,
+            visualEvidence,
           },
           {
-            cause: 'Nitrogen Deficiency (Chlorosis)',
+            cause: 'Nitrogen Deficiency (Basal Leaf Chlorosis)',
             likelihood: 38,
             description: 'Mobile nitrogen is mobilized from older foliage to support new apical growth when potting nutrients are depleted.',
             visualEvidence: 'Gradual loss of rich emerald green across basal leaves.',
+          },
+          {
+            cause: 'Harsh UV Light Scorch or Heat Stress',
+            likelihood: 22,
+            description: 'Excessive direct midday sunlight bleaching chloroplasts on exposed upper foliage.',
+            visualEvidence: 'Crispy dry parchment patches on light-facing leaves.',
           },
         ],
         treatmentPlan: {
@@ -180,14 +235,22 @@ Return ONLY a valid JSON object matching this schema (do NOT wrap in markdown ba
             options: ['Yes, drains into a saucer', 'No drainage holes (sealed pot)', 'Unsure'],
           },
         ],
+        insufficientEvidence: false,
+        insufficientEvidenceReason: '',
+        neededInformation: [
+          'Close-up photo of leaf undersides to check for spider mites or scale insects',
+          'Photo of root ball / drainage holes to assess root health',
+        ],
         imageUrl: image,
         disclaimer: 'Visual AI assessments are diagnostic guides. Soil conditions, microclimates, and root health may affect outcomes.',
+        isDemoMode: true,
       },
       isDemoMode: true,
-      demoNote: 'Running in demonstration mode. Add a GEMINI_API_KEY in environment variables for live multimodal vision diagnostics.',
+      demoNote: 'Running in demonstration mode. Add a GEMINI_API_KEY in Settings for live multimodal vision diagnostics.',
     });
-  } catch (err: any) {
-    console.error('Error in diagnose route:', err);
-    return NextResponse.json({ error: err?.message || 'Failed to diagnose plant' }, { status: 500 });
+  } catch (err: unknown) {
+    const errorMsg = err instanceof Error ? err.message : 'Failed to diagnose plant';
+    console.error('Error in diagnose route:', errorMsg);
+    return NextResponse.json({ error: errorMsg }, { status: 500 });
   }
 }

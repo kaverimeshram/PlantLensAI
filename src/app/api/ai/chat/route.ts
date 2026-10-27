@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { AiChatMessage } from '@/types/plant';
 
 export async function POST(req: NextRequest) {
   try {
@@ -17,7 +18,9 @@ export async function POST(req: NextRequest) {
           ? `Current Plant Context: Name: ${plantContext.name}, Scientific: ${plantContext.scientificName || 'Unknown'}, Details: ${plantContext.details || ''}.`
           : 'No specific plant currently selected.';
 
-        const conversationHistory = messages.map((m: any) => `${m.role.toUpperCase()}: ${m.content}`).join('\n');
+        const conversationHistory = (messages || [])
+          .map((m: AiChatMessage) => `${m.role.toUpperCase()}: ${m.content}`)
+          .join('\n');
 
         const systemPrompt = `You are PlantLens AI Botanist, an expert botanical scientist, plant pathologist, and experienced horticultural advisor.
 ${plantContextStr}
@@ -42,13 +45,14 @@ ASSISTANT:`;
           reply,
           isDemoMode: false,
         });
-      } catch (err: any) {
-        console.warn('Gemini chat error, falling back to simulated reply:', err?.message || err);
+      } catch (err: unknown) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        console.warn('Gemini chat error, falling back to simulated reply:', errorMsg);
       }
     }
 
     // High quality demo fallback
-    const lastUserMsg = messages[messages.length - 1]?.content || '';
+    const lastUserMsg = messages && messages.length > 0 ? messages[messages.length - 1]?.content || '' : '';
     const q = lastUserMsg.toLowerCase();
     const plantName = plantContext?.name || 'this plant';
     const sciName = plantContext?.scientificName ? ` (*${plantContext.scientificName}*)` : '';
@@ -92,10 +96,11 @@ ASSISTANT:`;
     return NextResponse.json({
       reply,
       isDemoMode: true,
-      demoNote: 'Running in demonstration mode. Connect a GEMINI_API_KEY for dynamic generative AI conversations.',
+      demoNote: 'Running in demonstration mode. Connect a GEMINI_API_KEY in Settings for dynamic generative AI conversations.',
     });
-  } catch (err: any) {
-    console.error('Error in chat route:', err);
-    return NextResponse.json({ error: err?.message || 'Failed to process chat' }, { status: 500 });
+  } catch (err: unknown) {
+    const errorMsg = err instanceof Error ? err.message : 'Failed to process chat';
+    console.error('Error in chat route:', errorMsg);
+    return NextResponse.json({ error: errorMsg }, { status: 500 });
   }
 }

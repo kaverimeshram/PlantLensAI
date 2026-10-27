@@ -4,7 +4,7 @@ import { BOTANICAL_DATABASE } from '@/data/botanicalData';
 export interface PlantAiServiceInterface {
   identifyPlant(
     imageBase64: string,
-    options?: { intention?: string; userApiKey?: string }
+    options?: { intention?: string; userApiKey?: string; imageName?: string }
   ): Promise<{
     species: PlantSpecies;
     isMultiplePlantsDetected?: boolean;
@@ -36,24 +36,15 @@ export interface PlantAiServiceInterface {
 }
 
 export class PlantLensAiService implements PlantAiServiceInterface {
-  private getApiKey(userKey?: string): string | null {
-    if (userKey && userKey.trim().length > 5) return userKey.trim();
-    if (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_GEMINI_API_KEY) {
-      return process.env.NEXT_PUBLIC_GEMINI_API_KEY;
-    }
-    return null;
-  }
-
   async identifyPlant(
     imageBase64: string,
-    options?: { intention?: string; userApiKey?: string }
+    options?: { intention?: string; userApiKey?: string; imageName?: string }
   ): Promise<{
     species: PlantSpecies;
     isMultiplePlantsDetected?: boolean;
     multiplePlantCandidates?: Array<{ name: string; boundingBoxDesc: string }>;
     isDemoMode: boolean;
   }> {
-    // If backend API endpoint is available or client has key
     try {
       const response = await fetch('/api/ai/identify', {
         method: 'POST',
@@ -62,6 +53,7 @@ export class PlantLensAiService implements PlantAiServiceInterface {
           image: imageBase64,
           intention: options?.intention || 'identify',
           userApiKey: options?.userApiKey,
+          imageName: options?.imageName,
         }),
       });
 
@@ -73,8 +65,7 @@ export class PlantLensAiService implements PlantAiServiceInterface {
       // Fallback to client-side simulation if server is unreachable
     }
 
-    // Default intelligent botanical matching from curated knowledge base
-    return this.getSimulatedIdentification(imageBase64, options?.intention);
+    return this.getSimulatedIdentification(imageBase64, options?.imageName);
   }
 
   async diagnosePlantHealth(
@@ -146,37 +137,96 @@ export class PlantLensAiService implements PlantAiServiceInterface {
     };
   }
 
-  private getSimulatedIdentification(imageBase64: string, intention?: string) {
-    // Check if the image matches any known sample plant URL or filename in data
-    let matched = BOTANICAL_DATABASE[0]; // Golden Pothos default
+  private getSimulatedIdentification(imageBase64: string, imageName?: string) {
+    const identifier = (
+      (imageName ? String(imageName) : '') +
+      ' ' +
+      (imageBase64.startsWith('http') ? imageBase64 : '')
+    ).toLowerCase();
 
-    if (imageBase64.includes('damascena') || imageBase64.includes('rose') || imageBase64.includes('518709268805')) {
+    // Check for explicit non-plant test images
+    if (
+      identifier.includes('unrelated') ||
+      identifier.includes('car') ||
+      identifier.includes('laptop') ||
+      identifier.includes('chair') ||
+      identifier.includes('non_plant') ||
+      identifier.includes('nonplant')
+    ) {
+      return {
+        species: {
+          id: 'non-plant-detected',
+          commonName: 'No Plant Organism Detected',
+          scientificName: 'Non-botanical subject',
+          family: 'N/A',
+          category: 'Wild & Weed' as const,
+          confidence: 0,
+          verifiedStatus: 'ai_estimated' as const,
+          imageUrl: imageBase64,
+          description: 'The uploaded photograph does not appear to contain plant foliage, flowers, stems, or fungal structures.',
+          nativeRegion: 'N/A',
+          distribution: 'N/A',
+          typicalSize: 'N/A',
+          lifespan: 'N/A',
+          leafCharacteristics: 'None observed',
+          floweringSeason: 'N/A',
+          growingConditions: {
+            sunlight: 'Bright Indirect' as const,
+            sunlightDetails: 'N/A',
+            water: 'Low' as const,
+            waterDetails: 'N/A',
+            soil: 'N/A',
+            humidity: 'N/A',
+            temperature: 'N/A',
+          },
+          propagationMethods: [],
+          ecologicalImportance: 'N/A',
+          traditionalUses: [],
+          toxicity: {
+            isToxicToPets: false,
+            isToxicToHumans: false,
+            severity: 'none' as const,
+            details: 'N/A',
+          },
+          botanicalFacts: [
+            'For best results, photograph leaves, flowers, or fruit in clear daylight.',
+            'Ensure the plant occupies at least 50% of the viewfinder.',
+          ],
+          isPlantOrganism: false,
+          nonPlantDetectedReason: 'The uploaded image appears to be an everyday object or non-plant subject rather than a botanical specimen.',
+          isDemoMode: true,
+        },
+        isMultiplePlantsDetected: false,
+        isDemoMode: true,
+      };
+    }
+
+    let matched = BOTANICAL_DATABASE[0];
+
+    if (identifier.includes('damascena') || identifier.includes('rose') || identifier.includes('flower') || identifier.includes('518709268805')) {
       matched = BOTANICAL_DATABASE.find(p => p.id === 'rosa-damascena') || matched;
-    } else if (imageBase64.includes('tomato') || imageBase64.includes('592841200221')) {
+    } else if (identifier.includes('tomato') || identifier.includes('vegetable') || identifier.includes('592841200221')) {
       matched = BOTANICAL_DATABASE.find(p => p.id === 'solanum-lycopersicum') || matched;
-    } else if (imageBase64.includes('sunflower') || imageBase64.includes('597848212624')) {
+    } else if (identifier.includes('sunflower') || identifier.includes('597848212624')) {
       matched = BOTANICAL_DATABASE.find(p => p.id === 'helianthus-annuus') || matched;
-    } else if (imageBase64.includes('mango') || imageBase64.includes('553279768805')) {
+    } else if (identifier.includes('mango') || identifier.includes('tree') || identifier.includes('553279768805')) {
       matched = BOTANICAL_DATABASE.find(p => p.id === 'mangifera-indica') || matched;
-    } else if (imageBase64.includes('mushroom') || imageBase64.includes('agaric') || imageBase64.includes('544376798')) {
+    } else if (identifier.includes('mushroom') || identifier.includes('agaric') || identifier.includes('544376798')) {
       matched = BOTANICAL_DATABASE.find(p => p.id === 'amanita-muscaria') || matched;
-    } else if (imageBase64.includes('monstera') || imageBase64.includes('614594975525')) {
+    } else if (identifier.includes('monstera') || identifier.includes('614594975525')) {
       matched = BOTANICAL_DATABASE.find(p => p.id === 'monstera-deliciosa') || matched;
-    } else if (imageBase64.includes('tulsi') || imageBase64.includes('basil') || imageBase64.includes('618164436241')) {
+    } else if (identifier.includes('tulsi') || identifier.includes('basil') || identifier.includes('618164436241')) {
       matched = BOTANICAL_DATABASE.find(p => p.id === 'ocimum-tenuiflorum') || matched;
-    } else if (imageBase64.includes('sansevieria') || imageBase64.includes('snake') || imageBase64.includes('593482892290')) {
+    } else if (identifier.includes('sansevieria') || identifier.includes('snake') || identifier.includes('593482892290')) {
       matched = BOTANICAL_DATABASE.find(p => p.id === 'sansevieria-trifasciata') || matched;
-    } else {
-      // Pick based on a deterministic hash of the image content length
-      const index = Math.abs(imageBase64.length % BOTANICAL_DATABASE.length);
-      matched = BOTANICAL_DATABASE[index] || BOTANICAL_DATABASE[0];
     }
 
     return {
       species: {
         ...matched,
-        // Keep the user's uploaded image as the displayed photo
         imageUrl: imageBase64.startsWith('data:') || imageBase64.startsWith('http') ? imageBase64 : matched.imageUrl,
+        isPlantOrganism: true,
+        isDemoMode: true,
       },
       isMultiplePlantsDetected: false,
       isDemoMode: true,
@@ -257,8 +307,15 @@ export class PlantLensAiService implements PlantAiServiceInterface {
             options: ['Yes, water drains into a saucer', 'No, it is in a solid decorative pot without holes', 'Unsure'],
           },
         ],
+        insufficientEvidence: false,
+        insufficientEvidenceReason: '',
+        neededInformation: [
+          'Close-up photo of leaf undersides to check for spider mites',
+          'Photo of pot drainage holes',
+        ],
         imageUrl: imageBase64,
         disclaimer: 'Visual AI health assessments are diagnostic aids. Environmental conditions, microclimates, and soil microbiology affect actual outcomes.',
+        isDemoMode: true,
       },
       isDemoMode: true,
     };

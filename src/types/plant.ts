@@ -77,6 +77,9 @@ export interface PlantSpecies {
     canGrowInArid: boolean;
     localNotes?: string;
   };
+  isPlantOrganism?: boolean;
+  nonPlantDetectedReason?: string;
+  isDemoMode?: boolean;
 }
 
 export interface PossibleCause {
@@ -125,6 +128,11 @@ export interface PlantDiagnosis {
   };
   disclaimer: string;
   isMushroomOrToxic?: boolean;
+  isDemoMode?: boolean;
+  isPlantOrganism?: boolean;
+  insufficientEvidence?: boolean;
+  insufficientEvidenceReason?: string;
+  neededInformation?: string[];
 }
 
 export interface PlantTimelineEvent {

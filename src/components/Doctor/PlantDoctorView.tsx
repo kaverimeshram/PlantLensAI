@@ -3,28 +3,21 @@
 import React, { useState } from 'react';
 import { usePlant } from '@/context/PlantContext';
 import { plantAiService } from '@/services/aiProvider';
-import { PlantDiagnosis } from '@/types/plant';
 import { COMMON_SYMPTOMS_CATALOG } from '@/data/botanicalData';
 import {
   Stethoscope,
   Upload,
   AlertCircle,
-  CheckCircle2,
   AlertTriangle,
   Sparkles,
-  HelpCircle,
   Droplets,
   Sun,
-  ShieldAlert,
-  ArrowRight,
   RotateCcw,
   PlusCircle,
-  FileText,
   Calendar,
   MessageSquareQuote,
   Activity,
   Layers,
-  Thermometer,
 } from 'lucide-react';
 
 const SAMPLE_DISEASED_SPECIMENS = [
@@ -569,6 +562,55 @@ export const PlantDoctorView: React.FC = () => {
               </div>
             </div>
           </div>
+
+          {/* DEMO MODE NOTICE IF APPLICABLE */}
+          {currentDiagnosis.isDemoMode && (
+            <div className="p-3.5 rounded-2xl bg-[#FFFBEB] border border-[#FDE68A] flex items-center justify-between gap-3 text-xs text-[#92400E]">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-[#D97706] animate-pulse" />
+                <span className="font-medium">
+                  <strong>Demonstration Diagnosis:</strong> Running without a Gemini API Key. Differential diagnosis generated using our curated pathology catalog. Add a key in Settings for live vision diagnostics.
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* INSUFFICIENT EVIDENCE / NEEDED INFORMATION CARD */}
+          {(currentDiagnosis.insufficientEvidence || (currentDiagnosis.neededInformation && currentDiagnosis.neededInformation.length > 0)) && (
+            <div className="p-5 rounded-2xl bg-[#FFFBEB] border-2 border-[#FDE68A] shadow-xs space-y-3">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-[#D97706] shrink-0 mt-0.5" />
+                <div className="space-y-1 text-xs">
+                  <h4 className="font-bold text-[#92400E] text-sm flex items-center gap-2">
+                    <span>Further Photographic Evidence Recommended</span>
+                    {currentDiagnosis.insufficientEvidence && (
+                      <span className="px-2 py-0.5 rounded-full bg-[#D97706] text-white text-[10px]">Preliminary Assessment</span>
+                    )}
+                  </h4>
+                  <p className="text-[#78350F] leading-relaxed">
+                    {currentDiagnosis.insufficientEvidenceReason ||
+                      'Visual symptoms alone leave some uncertainty between cultural overwatering vs fungal pathogen stress.'}
+                  </p>
+                </div>
+              </div>
+
+              {currentDiagnosis.neededInformation && currentDiagnosis.neededInformation.length > 0 && (
+                <div className="pt-2 border-t border-[#FDE68A]/80 text-xs">
+                  <span className="font-bold text-[#92400E] block mb-1.5">
+                    Recommended Additional Photos & Checks:
+                  </span>
+                  <ul className="space-y-1 text-[#78350F]">
+                    {currentDiagnosis.neededInformation.map((item, idx) => (
+                      <li key={idx} className="flex items-start gap-2">
+                        <span className="text-[#D97706] font-bold">&#8226;</span>
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* RANKED DIFFERENTIAL CAUSES */}
           <div className="nature-card p-6">

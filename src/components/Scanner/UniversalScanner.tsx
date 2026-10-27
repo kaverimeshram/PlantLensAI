@@ -10,14 +10,11 @@ import {
   Upload,
   RefreshCw,
   Sparkles,
-  CheckCircle,
   AlertCircle,
   SwitchCamera,
   Layers,
   ArrowRight,
-  Info,
   SlidersHorizontal,
-  Flame,
   Leaf,
   Stethoscope,
   BookOpen,
@@ -54,6 +51,7 @@ export const UniversalScanner: React.FC<UniversalScannerProps> = ({
   // Mode states: 'idle' | 'camera_active' | 'preview' | 'analyzing'
   const [scannerState, setScannerState] = useState<'idle' | 'camera_active' | 'preview' | 'analyzing'>('idle');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [intention, setIntention] = useState<'identify' | 'health' | 'uses' | 'care'>(defaultIntention);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -118,8 +116,9 @@ export const UniversalScanner: React.FC<UniversalScannerProps> = ({
 
       setFacingMode(mode);
       setScannerState('camera_active');
-    } catch (err: any) {
-      console.error('Camera access error:', err);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('Camera access error:', msg);
       setCameraError(
         'Unable to access your device camera. Please check camera permissions in your browser, or upload an image file instead.'
       );
@@ -152,16 +151,27 @@ export const UniversalScanner: React.FC<UniversalScannerProps> = ({
     }
   };
 
-  // Handle gallery file upload
+  // Handle gallery file upload with validation
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (!file.type.startsWith('image/')) {
+      setCameraError('Unsupported file format. Please upload a valid image file (JPEG, PNG, WebP).');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    setCameraError(null);
+    setSelectedFileName(file.name);
     const reader = new FileReader();
     reader.onload = () => {
       setSelectedImage(reader.result as string);
       stopCamera();
       setScannerState('preview');
+    };
+    reader.onerror = () => {
+      setCameraError('Failed to read image file. Please choose another photograph.');
     };
     reader.readAsDataURL(file);
   };
@@ -169,6 +179,7 @@ export const UniversalScanner: React.FC<UniversalScannerProps> = ({
   // Sample plant fast select
   const handleSelectSample = (sample: typeof BOTANICAL_DATABASE[0]) => {
     setSelectedImage(sample.imageUrl);
+    setSelectedFileName(sample.commonName);
     stopCamera();
     setScannerState('preview');
   };
@@ -184,6 +195,7 @@ export const UniversalScanner: React.FC<UniversalScannerProps> = ({
       const result = await plantAiService.identifyPlant(selectedImage, {
         intention,
         userApiKey,
+        imageName: selectedFileName || undefined,
       });
 
       if (result.isMultiplePlantsDetected && result.multiplePlantCandidates?.length) {
@@ -201,8 +213,9 @@ export const UniversalScanner: React.FC<UniversalScannerProps> = ({
       } else {
         onScanComplete(result.species);
       }
-    } catch (err: any) {
-      console.error('Scan error:', err);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('Scan error:', msg);
       // Fallback species on failure
       const fallback = BOTANICAL_DATABASE[0];
       onScanComplete(fallback);
@@ -211,6 +224,7 @@ export const UniversalScanner: React.FC<UniversalScannerProps> = ({
 
   const handleRetake = () => {
     setSelectedImage(null);
+    setSelectedFileName(null);
     setDetectedMultiple(false);
     setMultiCandidates([]);
     setScannerState('idle');

@@ -33,7 +33,13 @@ interface PlantContextType {
   updateSavedPlant: (id: string, updates: Partial<SavedPlant>) => void;
   deleteSavedPlant: (id: string) => void;
   waterPlant: (id: string) => void;
-  addTimelineObservation: (plantId: string, note: string, type?: 'observation' | 'photo' | 'diagnosis' | 'water', imageUrl?: string, healthScore?: number) => void;
+  addTimelineObservation: (
+    plantId: string,
+    note: string,
+    type?: 'observation' | 'photo' | 'diagnosis' | 'water',
+    imageUrl?: string,
+    healthScore?: number
+  ) => void;
 
   careReminders: CareReminder[];
   toggleReminderDone: (id: string) => void;
@@ -88,39 +94,41 @@ export const PlantProvider = ({ children }: { children: ReactNode }) => {
   const [isDemoMode, setIsDemoMode] = useState<boolean>(true);
   const [userLocation, setUserLocationState] = useState<string>('Maharashtra, India');
 
-  // Initial load from localStorage
+  // Deferred hydration from localStorage to prevent React 19 cascading renders & lint errors
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    const timer = setTimeout(() => {
+      try {
+        const storedPlants = localStorage.getItem(LOCAL_STORAGE_KEYS.SAVED_PLANTS);
+        if (storedPlants) {
+          setSavedPlants(JSON.parse(storedPlants));
+        }
 
-    try {
-      const storedPlants = localStorage.getItem(LOCAL_STORAGE_KEYS.SAVED_PLANTS);
-      if (storedPlants) {
-        setSavedPlants(JSON.parse(storedPlants));
-      }
+        const storedReminders = localStorage.getItem(LOCAL_STORAGE_KEYS.REMINDERS);
+        if (storedReminders) {
+          setCareReminders(JSON.parse(storedReminders));
+        }
 
-      const storedReminders = localStorage.getItem(LOCAL_STORAGE_KEYS.REMINDERS);
-      if (storedReminders) {
-        setCareReminders(JSON.parse(storedReminders));
-      }
+        const storedScans = localStorage.getItem(LOCAL_STORAGE_KEYS.RECENT_SCANS);
+        if (storedScans) {
+          setRecentScans(JSON.parse(storedScans));
+        }
 
-      const storedScans = localStorage.getItem(LOCAL_STORAGE_KEYS.RECENT_SCANS);
-      if (storedScans) {
-        setRecentScans(JSON.parse(storedScans));
-      }
+        const storedApiKey = localStorage.getItem(LOCAL_STORAGE_KEYS.API_KEY);
+        if (storedApiKey) {
+          setUserApiKeyState(storedApiKey);
+          setIsDemoMode(false);
+        }
 
-      const storedApiKey = localStorage.getItem(LOCAL_STORAGE_KEYS.API_KEY);
-      if (storedApiKey) {
-        setUserApiKeyState(storedApiKey);
-        setIsDemoMode(false);
+        const storedLocation = localStorage.getItem(LOCAL_STORAGE_KEYS.LOCATION);
+        if (storedLocation) {
+          setUserLocationState(storedLocation);
+        }
+      } catch (e) {
+        console.error('Failed to load from local storage', e);
       }
+    }, 0);
 
-      const storedLocation = localStorage.getItem(LOCAL_STORAGE_KEYS.LOCATION);
-      if (storedLocation) {
-        setUserLocationState(storedLocation);
-      }
-    } catch (e) {
-      console.error('Failed to load from local storage', e);
-    }
+    return () => clearTimeout(timer);
   }, []);
 
   // Save changes to localStorage
@@ -145,6 +153,12 @@ export const PlantProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const savePlantToCollection = (species: PlantSpecies, nickname?: string, location: string = 'Living Room'): SavedPlant => {
+    const validLocation = (
+      ['Living Room', 'Balcony', 'Garden', 'Kitchen', 'Bedroom', 'Office', 'Outdoor Farm'].includes(location)
+        ? location
+        : 'Living Room'
+    ) as SavedPlant['location'];
+
     const newPlant: SavedPlant = {
       id: 'saved-' + Date.now(),
       name: species.commonName,
@@ -153,7 +167,7 @@ export const PlantProvider = ({ children }: { children: ReactNode }) => {
       category: species.category,
       imageUrl: species.imageUrl,
       dateAdded: new Date().toISOString().split('T')[0],
-      location: (location as any) || 'Living Room',
+      location: validLocation,
       wateringFrequencyDays: species.growingConditions?.water === 'Low' ? 14 : species.growingConditions?.water === 'Frequent' ? 3 : 6,
       lastWateredDate: new Date().toISOString().split('T')[0],
       sunlightRequirement: species.growingConditions?.sunlight || 'Bright Indirect',
@@ -178,7 +192,7 @@ export const PlantProvider = ({ children }: { children: ReactNode }) => {
       localStorage.setItem(LOCAL_STORAGE_KEYS.SAVED_PLANTS, JSON.stringify(updated));
     }
 
-    // Also auto-add an initial reminder for watering
+    // Auto-add an initial reminder for watering
     const newReminder: CareReminder = {
       id: 'rem-' + Date.now(),
       plantId: newPlant.id,
@@ -303,7 +317,6 @@ export const PlantProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const addRecentScan = (species: PlantSpecies) => {
-    // Avoid immediate duplicates
     const filtered = recentScans.filter(s => s.id !== species.id && s.scientificName !== species.scientificName);
     const updated = [species, ...filtered].slice(0, 8);
     setRecentScans(updated);

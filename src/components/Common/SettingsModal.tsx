@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { usePlant } from '@/context/PlantContext';
-import { X, KeyRound, Sparkles, MapPin, CheckCircle2, AlertCircle, Info, ExternalLink } from 'lucide-react';
+import { X, KeyRound, Sparkles, MapPin, CheckCircle2, Info, ExternalLink } from 'lucide-react';
 
 interface SettingsModalProps {
   isOpen: boolean;

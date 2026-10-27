@@ -15,17 +15,13 @@ import {
   Droplets,
   Sprout,
   Compass,
-  AlertTriangle,
   CheckCircle2,
   Sparkles,
-  Info,
   Layers,
   Thermometer,
   TreeDeciduous,
   Leaf,
   Flower2,
-  Calendar,
-  ExternalLink,
   HeartHandshake,
 } from 'lucide-react';
 
@@ -85,6 +81,58 @@ export const IdentificationResultView: React.FC<IdentificationResultViewProps> =
     setTimeout(() => setCopiedShare(false), 2000);
   };
 
+  if (species.isPlantOrganism === false) {
+    return (
+      <div className="w-full max-w-2xl mx-auto p-8 rounded-3xl bg-white border-2 border-[#183D32]/10 shadow-xl text-center space-y-6 animate-in fade-in duration-300">
+        <div className="w-20 h-20 rounded-3xl bg-[#FEF2F2] border border-[#FECACA] flex items-center justify-center mx-auto text-[#DC2626]">
+          <ShieldAlert className="w-10 h-10" />
+        </div>
+
+        <div className="space-y-2">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#FEF2F2] text-[#DC2626] text-xs font-bold uppercase tracking-wider">
+            Non-Plant Subject Detected
+          </div>
+          <h2 className="font-serif text-2xl sm:text-3xl font-bold text-[#183D32]">
+            No Plant Organism Found
+          </h2>
+          <p className="text-sm text-[#475850] max-w-md mx-auto leading-relaxed">
+            {species.nonPlantDetectedReason ||
+              'The uploaded image appears to contain an object, vehicle, furniture, animal, or non-botanical subject.'}
+          </p>
+        </div>
+
+        {species.imageUrl && (
+          <div className="w-48 h-48 mx-auto rounded-2xl overflow-hidden border border-[#183D32]/10 shadow-inner bg-stone-100">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={species.imageUrl} alt="Uploaded non-plant preview" className="w-full h-full object-cover" />
+          </div>
+        )}
+
+        <div className="p-4 rounded-2xl bg-[#F7F8F3] border border-[#183D32]/10 text-left text-xs space-y-2">
+          <div className="font-bold text-[#183D32] uppercase tracking-wider">
+            Tips for Plant Identification:
+          </div>
+          <ul className="space-y-1 text-[#475850] list-disc list-inside">
+            <li>Take a clear, well-lit photo of a flower, leaf, or tree bark.</li>
+            <li>Fill at least 50% of the frame with the plant foliage.</li>
+            <li>Avoid heavy motion blur or extreme distance.</li>
+          </ul>
+        </div>
+
+        <div className="flex items-center justify-center gap-3 pt-2">
+          <button
+            type="button"
+            onClick={onScanAnother}
+            className="py-3 px-6 rounded-xl bg-[#183D32] text-[#F7F8F3] font-bold text-sm hover:bg-[#122E26] shadow-md transition-all flex items-center gap-2"
+          >
+            <RotateCcw className="w-4 h-4" />
+            <span>Scan Another Image</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   const isMushroomOrToxic =
     species.category === 'Mushroom & Fungi' ||
     species.toxicity?.severity === 'severe' ||
@@ -93,6 +141,18 @@ export const IdentificationResultView: React.FC<IdentificationResultViewProps> =
 
   return (
     <div className="w-full max-w-4xl mx-auto space-y-6 animate-in fade-in duration-300 pb-12">
+      {/* SIMULATED DEMO MODE TRANSPARENCY NOTICE */}
+      {species.isDemoMode && (
+        <div className="p-3.5 rounded-2xl bg-[#FFFBEB] border border-[#FDE68A] flex items-center justify-between gap-3 text-xs text-[#92400E]">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-[#D97706] animate-pulse" />
+            <span className="font-medium">
+              <strong>Demonstration Mode:</strong> No Gemini API key detected. Botanical data is referenced from our verified catalog. For live vision identification on custom photos, add a key in Settings.
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* CRITICAL MUSHROOM / TOXICITY SAFETY BANNER IF APPLICABLE */}
       {isMushroomOrToxic && (
         <div className="p-4 rounded-2xl bg-[#FEF2F2] border-2 border-[#FECACA] shadow-sm flex items-start gap-3.5">

@@ -7,18 +7,11 @@ import {
   Camera,
   Stethoscope,
   Sprout,
-  Compass,
   Sparkles,
   Droplets,
-  Sun,
   Clock,
   ArrowRight,
-  CheckCircle2,
-  AlertTriangle,
   Lightbulb,
-  HeartHandshake,
-  Calendar,
-  Layers,
 } from 'lucide-react';
 
 export const HomeView: React.FC = () => {
@@ -30,8 +23,6 @@ export const HomeView: React.FC = () => {
     recentScans,
     setCurrentSpecies,
     userLocation,
-    startDiagnosisForSpecies,
-    setIsChatOpen,
   } = usePlant();
 
   // Personalized time greeting
