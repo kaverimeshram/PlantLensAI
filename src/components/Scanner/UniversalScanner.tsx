@@ -162,6 +162,12 @@ export const UniversalScanner: React.FC<UniversalScannerProps> = ({
       return;
     }
 
+    if (file.size > 15 * 1024 * 1024) {
+      setCameraError('The selected image exceeds the 15MB limit. Please choose a smaller or compressed photograph.');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
     setCameraError(null);
     setSelectedFileName(file.name);
     const reader = new FileReader();

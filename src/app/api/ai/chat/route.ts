@@ -1,11 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { AiChatMessage } from '@/types/plant';
+import { checkRateLimit, withTimeout } from '@/lib/serverSecurity';
 
 export async function POST(req: NextRequest) {
   try {
+    // 1. Rate limiting
+    const rateLimit = checkRateLimit(req);
+    if (!rateLimit.allowed) {
+      return NextResponse.json(
+        { error: `Too many questions in a short period. Please wait ${rateLimit.resetSeconds}s before asking again.` },
+        {
+          status: 429,
+          headers: {
+            'Retry-After': String(rateLimit.resetSeconds),
+            'X-RateLimit-Limit': String(rateLimit.limit),
+            'X-RateLimit-Remaining': '0',
+          },
+        }
+      );
+    }
+
     const body = await req.json();
     const { messages, plantContext, userApiKey } = body;
+
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      return NextResponse.json({ error: 'Conversation messages are required' }, { status: 400 });
+    }
 
     const apiKey = userApiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
 
@@ -38,13 +59,25 @@ Conversation:
 ${conversationHistory}
 ASSISTANT:`;
 
-        const result = await model.generateContent(systemPrompt);
+        const result = await withTimeout(
+          model.generateContent(systemPrompt),
+          20000,
+          'Gemini Plant Assistant'
+        );
         const reply = result.response.text();
 
-        return NextResponse.json({
-          reply,
-          isDemoMode: false,
-        });
+        return NextResponse.json(
+          {
+            reply,
+            isDemoMode: false,
+          },
+          {
+            headers: {
+              'X-RateLimit-Limit': String(rateLimit.limit),
+              'X-RateLimit-Remaining': String(rateLimit.remaining),
+            },
+          }
+        );
       } catch (err: unknown) {
         const errorMsg = err instanceof Error ? err.message : String(err);
         console.warn('Gemini chat error, falling back to simulated reply:', errorMsg);

@@ -93,6 +93,16 @@ export const PlantDoctorView: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (!file.type.startsWith('image/')) {
+      alert('Please select an image file (JPEG, PNG, WebP).');
+      return;
+    }
+
+    if (file.size > 15 * 1024 * 1024) {
+      alert('The selected image exceeds 15MB. Please choose a smaller photo.');
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = () => {
       setImage(reader.result as string);

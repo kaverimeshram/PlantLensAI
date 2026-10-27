@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { BOTANICAL_DATABASE } from '@/data/botanicalData';
 import { PlantSpecies } from '@/types/plant';
+import { checkRateLimit, validateImageInput, withTimeout } from '@/lib/serverSecurity';
 
 // Helper to convert remote URL or data URL to clean base64 & mimeType
 async function resolveImageBase64(imageStr: string): Promise<{ base64Data: string; mimeType: string }> {
@@ -13,7 +14,7 @@ async function resolveImageBase64(imageStr: string): Promise<{ base64Data: strin
   }
 
   if (imageStr.startsWith('http://') || imageStr.startsWith('https://')) {
-    const res = await fetch(imageStr);
+    const res = await withTimeout(fetch(imageStr), 10000, 'Image download');
     if (!res.ok) {
       throw new Error(`Failed to fetch image from URL: ${res.statusText}`);
     }
@@ -29,21 +30,32 @@ async function resolveImageBase64(imageStr: string): Promise<{ base64Data: strin
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { image, intention, userApiKey, imageName } = body;
-
-    if (!image || typeof image !== 'string' || image.trim().length === 0) {
-      return NextResponse.json({ error: 'Image data is required' }, { status: 400 });
-    }
-
-    // Quick file check for text or invalid non-image formats
-    if (image.startsWith('data:text/') || image.startsWith('data:application/')) {
+    // 1. Enforce rate limiting per client IP
+    const rateLimit = checkRateLimit(req);
+    if (!rateLimit.allowed) {
       return NextResponse.json(
-        { error: 'Invalid file format. Please upload an image (JPEG, PNG, WebP).' },
-        { status: 400 }
+        { error: `Too many scan requests. Please wait ${rateLimit.resetSeconds}s before scanning again.` },
+        {
+          status: 429,
+          headers: {
+            'Retry-After': String(rateLimit.resetSeconds),
+            'X-RateLimit-Limit': String(rateLimit.limit),
+            'X-RateLimit-Remaining': '0',
+          },
+        }
       );
     }
 
+    const body = await req.json();
+    const { image, intention, userApiKey, imageName } = body;
+
+    // 2. Validate image input format and payload size (max 15MB)
+    const validation = validateImageInput(image);
+    if (!validation.valid) {
+      return NextResponse.json({ error: validation.error }, { status: validation.statusCode || 400 });
+    }
+
+    // Server-side environment key takes precedence, client key allowed for user flexibility
     const apiKey = userApiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
 
     // Extract non-base64 identifier from imageName and URL
@@ -69,6 +81,7 @@ export async function POST(req: NextRequest) {
         const { base64Data, mimeType } = await resolveImageBase64(image);
 
         const genAI = new GoogleGenerativeAI(apiKey);
+        // Standard production multimodal vision model
         const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
         const prompt = `You are PlantLens AI, a world-class botanical taxonomist and plant biologist.
@@ -117,7 +130,7 @@ If the photo does NOT depict a plant organism, tree, flower, fruit, vegetable, w
 If the image DOES contain a plant organism:
 Set "isPlantOrganism": true.
 If the image contains multiple distinct plants, set isMultiplePlantsDetected: true and list them in multiplePlantCandidates.
-Determine confidence percentage (0-100).
+Determine confidence percentage (0-100). Never fabricate high certainty if the image is blurry or ambiguous.
 Check if it is toxic to pets or humans.
 If it is a mushroom, always include a strict safety warning never to consume wild mushrooms based on photos alone.
 Distinguish verified botanical facts from folkloric traditional uses.
@@ -187,39 +200,51 @@ Return ONLY a valid JSON object matching this schema (do NOT wrap in markdown ba
   "multiplePlantCandidates": []
 }`;
 
-        const result = await model.generateContent([
-          prompt,
-          {
-            inlineData: {
-              data: base64Data,
-              mimeType: mimeType,
+        // 3. Execute with 25-second timeout wrapper
+        const result = await withTimeout(
+          model.generateContent([
+            prompt,
+            {
+              inlineData: {
+                data: base64Data,
+                mimeType: mimeType,
+              },
             },
-          },
-        ]);
+          ]),
+          25000,
+          'Gemini Plant Vision'
+        );
 
         const text = result.response.text().trim();
         const cleanedJson = text.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim();
         const parsed = JSON.parse(cleanedJson);
 
-        return NextResponse.json({
-          species: {
-            ...parsed,
-            imageUrl: image,
-            isPlantOrganism: parsed.isPlantOrganism !== false,
+        return NextResponse.json(
+          {
+            species: {
+              ...parsed,
+              imageUrl: image,
+              isPlantOrganism: parsed.isPlantOrganism !== false,
+              isDemoMode: false,
+            },
+            isMultiplePlantsDetected: !!parsed.isMultiplePlantsDetected,
+            multiplePlantCandidates: parsed.multiplePlantCandidates || [],
             isDemoMode: false,
           },
-          isMultiplePlantsDetected: !!parsed.isMultiplePlantsDetected,
-          multiplePlantCandidates: parsed.multiplePlantCandidates || [],
-          isDemoMode: false,
-        });
+          {
+            headers: {
+              'X-RateLimit-Limit': String(rateLimit.limit),
+              'X-RateLimit-Remaining': String(rateLimit.remaining),
+            },
+          }
+        );
       } catch (geminiError: unknown) {
         const errorMsg = geminiError instanceof Error ? geminiError.message : String(geminiError);
         console.warn('Gemini live call error, falling back to simulated analysis:', errorMsg);
       }
     }
 
-    // DEMO / SIMULATION MODE (No API Key or fallback)
-    // If the image is explicitly a non-plant test image:
+    // DEMO / SIMULATION MODE (No API Key configured or fallback)
     if (isExplicitNonPlantTest) {
       return NextResponse.json({
         species: {
@@ -301,7 +326,6 @@ Return ONLY a valid JSON object matching this schema (do NOT wrap in markdown ba
       isDirectSampleMatch = true;
     }
 
-    // If intention was health check, preserve intention
     if (intention === 'health') {
       matched = {
         ...matched,
@@ -321,7 +345,7 @@ Return ONLY a valid JSON object matching this schema (do NOT wrap in markdown ba
       isDemoMode: true,
       demoNote: isDirectSampleMatch
         ? `Matched reference specimen (${matched.commonName}) from botanical catalog in Demo Mode.`
-        : 'Running in demonstration mode. Connect a GEMINI_API_KEY in Settings for live multimodal visual identification on custom uploads.',
+        : 'Running in demonstration mode. Connect a GEMINI_API_KEY in Settings for live visual identification on custom uploads.',
     });
   } catch (error: unknown) {
     const errorMsg = error instanceof Error ? error.message : 'Failed to analyze plant';

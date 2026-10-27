@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { checkRateLimit, validateImageInput, withTimeout } from '@/lib/serverSecurity';
 
 // Helper to convert remote URL or data URL to clean base64 & mimeType
 async function resolveImageBase64(imageStr: string): Promise<{ base64Data: string; mimeType: string }> {
@@ -11,7 +12,7 @@ async function resolveImageBase64(imageStr: string): Promise<{ base64Data: strin
   }
 
   if (imageStr.startsWith('http://') || imageStr.startsWith('https://')) {
-    const res = await fetch(imageStr);
+    const res = await withTimeout(fetch(imageStr), 10000, 'Image download');
     if (!res.ok) {
       throw new Error(`Failed to fetch image from URL: ${res.statusText}`);
     }
@@ -26,11 +27,29 @@ async function resolveImageBase64(imageStr: string): Promise<{ base64Data: strin
 
 export async function POST(req: NextRequest) {
   try {
+    // 1. Rate limiting
+    const rateLimit = checkRateLimit(req);
+    if (!rateLimit.allowed) {
+      return NextResponse.json(
+        { error: `Too many diagnostic requests. Please wait ${rateLimit.resetSeconds}s before diagnosing again.` },
+        {
+          status: 429,
+          headers: {
+            'Retry-After': String(rateLimit.resetSeconds),
+            'X-RateLimit-Limit': String(rateLimit.limit),
+            'X-RateLimit-Remaining': '0',
+          },
+        }
+      );
+    }
+
     const body = await req.json();
     const { image, symptoms, answers, userApiKey } = body;
 
-    if (!image || typeof image !== 'string' || image.trim().length === 0) {
-      return NextResponse.json({ error: 'Image is required for diagnosis' }, { status: 400 });
+    // 2. Validate input and payload size
+    const validation = validateImageInput(image);
+    if (!validation.valid) {
+      return NextResponse.json({ error: validation.error }, { status: validation.statusCode || 400 });
     }
 
     const apiKey = userApiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
@@ -58,9 +77,9 @@ ${answersText}
 Analyze visible symptoms (chlorosis/yellowing, brown tips, wilting, leaf spots, holes/chewed margins, powdery mildew, mold, stunted growth, curling, stem/root rot, pests).
 Identify:
 1. Overall visual health: "healthy" | "mild_stress" | "moderate_issue" | "critical"
-2. Health score (0-100, where 100 is pristine)
+2. Health score (0-100, where 100 is pristine). Never fabricate 100% certainty when symptoms are ambiguous.
 3. Observed symptoms list
-4. Possible causes ranked by likelihood % with visual evidence supporting each
+4. Possible causes ranked by likelihood % with visual evidence supporting each. Never guarantee a diagnosis without disclaimer.
 5. Actionable treatment plan: immediate actions, watering adjustments, light/temp adjustments, soil/drainage recommendations, organic pest management, fertilizer advice (with safety precautions against fertilizer burn), prevention tips, follow-up schedule
 6. 2-3 relevant follow-up questions to refine the diagnosis if needed
 7. If the evidence in the photo is blurry, partial, or insufficient to reach a certain diagnosis, set "insufficientEvidence": true, provide an "insufficientEvidenceReason", and list 2-4 specific items in "neededInformation" (e.g. close-up of leaf undersides, photo of pot drainage holes, check soil 2 inches down).
@@ -113,28 +132,41 @@ Return ONLY a valid JSON object matching this schema (do NOT wrap in markdown ba
   "disclaimer": "Visual AI diagnosis is an advisory tool. Soil pathogens, viral infections, and microclimates may require physical laboratory testing."
 }`;
 
-        const result = await model.generateContent([
-          prompt,
-          {
-            inlineData: {
-              data: base64Data,
-              mimeType: mimeType,
+        // 3. Execute with 25s timeout wrapper
+        const result = await withTimeout(
+          model.generateContent([
+            prompt,
+            {
+              inlineData: {
+                data: base64Data,
+                mimeType: mimeType,
+              },
             },
-          },
-        ]);
+          ]),
+          25000,
+          'Gemini Plant Pathology'
+        );
 
         const text = result.response.text().trim();
         const cleanedJson = text.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim();
         const parsed = JSON.parse(cleanedJson);
 
-        return NextResponse.json({
-          diagnosis: {
-            ...parsed,
-            imageUrl: image,
+        return NextResponse.json(
+          {
+            diagnosis: {
+              ...parsed,
+              imageUrl: image,
+              isDemoMode: false,
+            },
             isDemoMode: false,
           },
-          isDemoMode: false,
-        });
+          {
+            headers: {
+              'X-RateLimit-Limit': String(rateLimit.limit),
+              'X-RateLimit-Remaining': String(rateLimit.remaining),
+            },
+          }
+        );
       } catch (geminiError: unknown) {
         const errorMsg = geminiError instanceof Error ? geminiError.message : String(geminiError);
         console.warn('Gemini diagnose error, falling back to simulated diagnosis:', errorMsg);

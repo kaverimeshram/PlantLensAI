@@ -15,6 +15,9 @@ import {
   Activity,
   X,
   Stethoscope,
+  Download,
+  Upload,
+  ShieldCheck,
 } from 'lucide-react';
 
 const LOCATIONS = [
@@ -35,6 +38,7 @@ export const MyPlantsView: React.FC = () => {
     waterPlant,
     addTimelineObservation,
     setActiveTab,
+    importCollection,
   } = usePlant();
 
   const [selectedLocation, setSelectedLocation] = useState<string>('All');
@@ -84,6 +88,36 @@ export const MyPlantsView: React.FC = () => {
     setIsAddingObservation(false);
   };
 
+  const handleExportBackup = () => {
+    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(savedPlants, null, 2));
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute('href', dataStr);
+    downloadAnchor.setAttribute('download', `plantlens-backup-${new Date().toISOString().split('T')[0]}.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+  };
+
+  const handleImportBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const parsed = JSON.parse(event.target?.result as string);
+        if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].name) {
+          importCollection(parsed);
+          alert(`Successfully imported ${parsed.length} plants into your collection!`);
+        } else {
+          alert('Invalid backup file format. Expected a PlantLens JSON export.');
+        }
+      } catch {
+        alert('Failed to parse backup file. Please ensure it is valid JSON.');
+      }
+    };
+    reader.readAsText(file);
+  };
+
   return (
     <div className="w-full max-w-5xl mx-auto space-y-6 animate-in fade-in duration-300 pb-16">
       {/* Top Banner & Stats */}
@@ -109,6 +143,37 @@ export const MyPlantsView: React.FC = () => {
           <Plus className="w-4 h-4" />
           <span>Scan & Add New Plant</span>
         </button>
+      </div>
+
+      {/* DATA PERSISTENCE & PRIVACY NOTICE */}
+      <div className="p-3.5 rounded-2xl bg-[#F7F8F3] border border-[#183D32]/10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-[#475850]">
+        <div className="flex items-center gap-2">
+          <ShieldCheck className="w-4 h-4 text-[#15803D] shrink-0" />
+          <span>
+            <strong>Device-Local Storage:</strong> Your collection and reminders persist in this browser. To transfer or back up data across devices, use the tools below.
+          </span>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={handleExportBackup}
+            className="py-1.5 px-3 rounded-xl bg-white border border-[#183D32]/20 hover:bg-[#EDF4EB] text-[11px] font-semibold text-[#183D32] flex items-center gap-1.5 transition-colors"
+            title="Download JSON backup"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>Export Backup</span>
+          </button>
+          <label className="py-1.5 px-3 rounded-xl bg-white border border-[#183D32]/20 hover:bg-[#EDF4EB] text-[11px] font-semibold text-[#183D32] flex items-center gap-1.5 transition-colors cursor-pointer">
+            <Upload className="w-3.5 h-3.5" />
+            <span>Restore Backup</span>
+            <input
+              type="file"
+              accept=".json"
+              onChange={handleImportBackup}
+              className="hidden"
+            />
+          </label>
+        </div>
       </div>
 
       {/* Filter Toolbar (Search & Location Chips) */}

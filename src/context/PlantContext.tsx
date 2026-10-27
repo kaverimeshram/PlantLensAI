@@ -32,6 +32,7 @@ interface PlantContextType {
   savePlantToCollection: (species: PlantSpecies, nickname?: string, location?: string) => SavedPlant;
   updateSavedPlant: (id: string, updates: Partial<SavedPlant>) => void;
   deleteSavedPlant: (id: string) => void;
+  importCollection: (imported: SavedPlant[]) => void;
   waterPlant: (id: string) => void;
   addTimelineObservation: (
     plantId: string,
@@ -229,6 +230,14 @@ export const PlantProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  const importCollection = (imported: SavedPlant[]) => {
+    if (!Array.isArray(imported)) return;
+    setSavedPlants(imported);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(LOCAL_STORAGE_KEYS.SAVED_PLANTS, JSON.stringify(imported));
+    }
+  };
+
   const waterPlant = (id: string) => {
     const today = new Date().toISOString().split('T')[0];
     const target = savedPlants.find(p => p.id === id);
@@ -376,6 +385,7 @@ export const PlantProvider = ({ children }: { children: ReactNode }) => {
         savePlantToCollection,
         updateSavedPlant,
         deleteSavedPlant,
+        importCollection,
         waterPlant,
         addTimelineObservation,
         careReminders,

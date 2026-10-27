@@ -1,36 +1,158 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# PlantLens AI 🌿
 
-## Getting Started
+> **Identify any plant organism, diagnose its health, and receive actionable botanical triage in seconds using multimodal AI.**
 
-First, run the development server:
+PlantLens AI is a modern full-stack web application designed for mobile and desktop devices. It empowers plant lovers, gardeners, farmers, and botanical explorers to photograph plants anywhere in the world, diagnose visible symptoms with differential pathology, track personal collections, and ask context-aware questions to an AI botanist.
 
+---
+
+## ✨ Primary Features
+
+1. **Universal Botanical Identification (`/`)**
+   - Live device camera viewfinder (WebRTC) with camera-flip and gallery upload.
+   - Intelligent organism detection: flowers, houseplants, trees, vegetables, crops, succulents, ferns, mosses, and fungi.
+   - Non-plant detection: gracefully identifies when an uploaded image is non-botanical (vehicles, electronics, animals, objects) and offers photo-taking guidance.
+   - Real botanical specimen tray for instant one-click testing.
+
+2. **Plant Doctor & Health Diagnostics**
+   - Multi-angle visual triage (leaf close-up, stem/node, potting soil).
+   - Visible symptom chips (chlorosis, tip necrosis, powdery mildew, blight, pests).
+   - Differential diagnosis: ranks multiple possible causes by **likelihood %** with supporting **Visual Evidence**.
+   - Actionable recovery plans: immediate steps, watering protocols, light/humidity adjustments, organic pest hygiene, and fertilizer precautions.
+   - Insufficient evidence handling: clearly recommends what additional photos or checks are needed when symptoms are ambiguous.
+
+3. **Personal Plant Collection ("My Plants")**
+   - Offline-first local persistence: plants and timeline logs survive page refreshes.
+   - One-tap watering logger ("Watered & Checked") with progress timeline.
+   - Location filtering (Living Room, Balcony, Garden, Farm).
+   - **Full Data Ownership**: 1-click **Export Backup** to JSON and **Restore Backup** without requiring an account or cloud dependency.
+
+4. **Botanical Encyclopedia ("Explore")**
+   - Searchable catalog across 10 botanical categories.
+   - Pet toxicity indicators (calcium oxalate alerts, dog/cat safety).
+   - Regional climate profiles (tropical monsoon, subtropical, Mediterranean, temperate).
+
+5. **AI Botanist Assistant Chat**
+   - Pinned active plant context for personalized conversations.
+   - Localized climate guidance (e.g., monsoon vs. summer care in Maharashtra / India or California).
+   - Scientific verification level tags (verified botanical evidence vs. folklore).
+
+6. **Safety & Toxicity Protection**
+   - **Wild Mushroom Warning**: Never guarantees wild mushroom edibility; displays strict warnings and poison control hotlines:
+     - **US Poison Control**: `1-800-222-1222`
+     - **India AIIMS Poison Hotline**: `1800-116-117`
+   - Toxicity profile for pets and humans.
+
+---
+
+## 🛠️ Technology Stack
+
+- **Framework**: Next.js 16 (App Router, Turbopack)
+- **UI & Components**: React 19, Tailwind CSS v4, Lucide React, Canvas Confetti
+- **AI Engine**: Google Gemini Vision (`@google/generative-ai` SDK, `gemini-1.5-flash`)
+- **Server Security**: Sliding-window rate limiting, 15MB payload limiter, format validator, and 25s timeout wrapper
+- **Persistence**: Browser `localStorage` with JSON export/restore capabilities
+
+---
+
+## 🚀 Getting Started Locally
+
+### Prerequisites
+- Node.js 18+ (tested on Node v20/v22/v25)
+- npm 9+
+
+### 1. Clone & Install Dependencies
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone https://github.com/kaverimeshram/PlantLensAI.git
+cd PlantLensAI
+npm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 2. Configure Environment Variables
+Copy the `.env.example` file to `.env.local`:
+```bash
+cp .env.example .env.local
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Open `.env.local` and add your Google Gemini API key:
+```env
+GEMINI_API_KEY=your_gemini_api_key_here
+```
+*(Get a free Gemini API key from [Google AI Studio](https://aistudio.google.com/app/apikey))*.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+> **Note on Demonstration Mode**: If no API key is provided, PlantLens AI operates in **Simulated Demonstration Mode** with transparent UI notices. Users can also enter a personal key directly in the app's Settings modal.
 
-## Learn More
+### 3. Run Quality & Build Checks
+```bash
+# Run ESLint (0 errors, 0 warnings)
+npm run lint
 
-To learn more about Next.js, take a look at the following resources:
+# Build the production bundle with Turbopack
+npm run build
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### 4. Start the Application
+```bash
+# Development server (Turbopack)
+npm run dev
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+# Or Production server on port 3000
+npm run start -- -p 3000
+```
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-## Deploy on Vercel
+---
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## 🛡️ Security & Privacy Architecture
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **Server-Side API Key Isolation**: Production API keys are stored strictly in server-side environment variables (`GEMINI_API_KEY`). They are never prefixed with `NEXT_PUBLIC_` and never exposed in client JS bundles.
+- **Rate Limiting**: In-memory sliding window rate limiter protects server routes from spam (25 requests/minute per client IP) with HTTP 429 response headers (`Retry-After`).
+- **File Upload Protection**: Max upload size capped at 15MB. Only image mime types (`image/jpeg`, `image/png`, `image/webp`, `image/heic`) are accepted; non-image files are rejected with HTTP 400/415.
+- **Request Timeouts**: All external calls to Gemini are wrapped with a 25-second `withTimeout` safeguard to prevent hung serverless processes.
+- **Data Privacy**: Collection data is stored locally in client storage. No telemetry or tracking cookies.
+
+---
+
+## 🚢 Vercel Deployment Checklist
+
+Follow these steps to deploy PlantLens AI to production on Vercel:
+
+1. **Push to GitHub**:
+   Ensure all changes are committed and pushed to your GitHub repository:
+   ```bash
+   git status
+   git push origin main
+   ```
+
+2. **Import Project into Vercel**:
+   - Go to [vercel.com](https://vercel.com) and log in.
+   - Click **"Add New..."** → **"Project"**.
+   - Select your `PlantLensAI` repository.
+
+3. **Configure Build Settings**:
+   - Framework Preset: **Next.js**
+   - Root Directory: `./`
+   - Build Command: `next build` (Default)
+   - Output Directory: `.next` (Default)
+
+4. **Add Environment Variables**:
+   Under **"Environment Variables"**, add:
+   - Key: `GEMINI_API_KEY`
+   - Value: `your_gemini_api_key`
+   - Environment: Select **Production**, **Preview**, and **Development**.
+
+5. **Deploy**:
+   - Click **"Deploy"**. Vercel will build the Next.js app using Turbopack.
+   - Once deployed, your production URL will be live (e.g. `https://plant-lens-ai.vercel.app`).
+
+6. **Post-Deployment Verification**:
+   - Visit the production URL.
+   - Test camera permissions or upload a flower/plant photo.
+   - Test an unrelated object photo to verify "No Plant Detected" rejection.
+   - Test the Plant Doctor triage.
+   - Inspect network tab to verify headers: `X-RateLimit-Limit`, `X-RateLimit-Remaining`.
+
+---
+
+## 📄 License
+MIT License. Created for botanical education, gardening assistance, and ecological appreciation.

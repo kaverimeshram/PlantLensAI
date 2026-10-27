@@ -188,9 +188,17 @@ export const IdentificationResultView: React.FC<IdentificationResultViewProps> =
             <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent md:hidden" />
 
             {/* Confidence Badge */}
-            <div className="absolute top-3 left-3 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#183D32]/90 backdrop-blur-md text-[#DCE8D9] border border-[#DCE8D9]/30 text-xs font-bold shadow-md">
-              <Sparkles className="w-3.5 h-3.5 text-[#34D399]" />
-              <span>{species.confidence}% Confidence</span>
+            <div className={`absolute top-3 left-3 flex items-center gap-1.5 px-3 py-1.5 rounded-full backdrop-blur-md text-xs font-bold shadow-md border ${
+              species.confidence >= 80
+                ? 'bg-[#183D32]/90 text-[#DCE8D9] border-[#DCE8D9]/30'
+                : species.confidence >= 60
+                ? 'bg-[#B45309]/90 text-amber-100 border-amber-300/40'
+                : 'bg-stone-800/90 text-stone-200 border-stone-600/40'
+            }`}>
+              <Sparkles className={`w-3.5 h-3.5 ${species.confidence >= 80 ? 'text-[#34D399]' : 'text-amber-300'}`} />
+              <span>
+                {species.isDemoMode ? `${species.confidence}% (Reference Specimen)` : `${species.confidence}% Match`}
+              </span>
             </div>
 
             {/* Category Tag */}
@@ -201,7 +209,13 @@ export const IdentificationResultView: React.FC<IdentificationResultViewProps> =
             {/* Verification status pill */}
             <div className="absolute bottom-3 left-3 flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-black/70 backdrop-blur-md text-[11px] font-medium text-stone-200">
               <CheckCircle2 className="w-3.5 h-3.5 text-[#34D399]" />
-              <span>{species.verifiedStatus === 'botanically_verified' ? 'Verified Taxonomy' : 'AI Estimated'}</span>
+              <span>
+                {species.isDemoMode
+                  ? 'Botanical Catalog Reference'
+                  : species.verifiedStatus === 'botanically_verified'
+                  ? 'Verified Taxonomy'
+                  : 'AI Visual Estimate'}
+              </span>
             </div>
           </div>
 
