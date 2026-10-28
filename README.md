@@ -82,13 +82,16 @@ GEMINI_API_KEY=your_gemini_api_key_here
 
 > **Note on Demonstration Mode**: If no API key is provided, PlantLens AI operates in **Simulated Demonstration Mode** with transparent UI notices. Users can also enter a personal key directly in the app's Settings modal.
 
-### 3. Run Quality & Build Checks
+### 3. Run Quality, Build & Automated Security Checks
 ```bash
 # Run ESLint (0 errors, 0 warnings)
 npm run lint
 
-# Build the production bundle with Turbopack
+# Build the production bundle with Next.js Turbopack
 npm run build
+
+# Run the automated 9-scenario verification test suite
+node scripts/test-suite.mjs
 ```
 
 ### 4. Start the Application
@@ -103,13 +106,29 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ---
 
+## 🗄️ Database & Cloud Persistence (Supabase + RLS)
+
+PlantLens AI is built with an **offline-first local architecture** that can seamlessly upgrade to **cloud-synced multi-device accounts**:
+
+- **Default (Local-First Mode)**: Requires no account or database setup. Saved plants, watering logs, and observations persist in browser storage with 1-click **Export Backup** and **Restore Backup** JSON tools.
+- **Production Cloud Sync (Optional)**: To enable user authentication and cross-device syncing:
+  1. Create a free project at [supabase.com](https://supabase.com).
+  2. Run the included schema migration in `supabase/schema.sql`. This provisions:
+     - `profiles`, `plants`, `plant_timeline`, `care_reminders`
+     - **Strict Row Level Security (RLS)** policies preventing users from ever querying or modifying other users' botanical collections.
+  3. Add `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` to your environment.
+
+---
+
 ## 🛡️ Security & Privacy Architecture
 
 - **Server-Side API Key Isolation**: Production API keys are stored strictly in server-side environment variables (`GEMINI_API_KEY`). They are never prefixed with `NEXT_PUBLIC_` and never exposed in client JS bundles.
+- **SSRF Attack Protection**: Remote image fetching is restricted strictly to HTTPS on authorized botanical domains (`images.unsplash.com`, `plus.unsplash.com`, `upload.wikimedia.org`). All private network IPs (RFC 1918, localhost, 127.0.0.1, 169.254.169.254, AWS metadata) are rejected with HTTP 400.
 - **Rate Limiting**: In-memory sliding window rate limiter protects server routes from spam (25 requests/minute per client IP) with HTTP 429 response headers (`Retry-After`).
 - **File Upload Protection**: Max upload size capped at 15MB. Only image mime types (`image/jpeg`, `image/png`, `image/webp`, `image/heic`) are accepted; non-image files are rejected with HTTP 400/415.
+- **Error Sanitization**: Server-side error handlers redact API keys, tokens, and sensitive infrastructure paths before returning messages to clients.
 - **Request Timeouts**: All external calls to Gemini are wrapped with a 25-second `withTimeout` safeguard to prevent hung serverless processes.
-- **Data Privacy**: Collection data is stored locally in client storage. No telemetry or tracking cookies.
+- **Data Privacy**: Collection data is stored locally in client storage or private PostgreSQL with RLS. No telemetry or tracking cookies.
 
 ---
 

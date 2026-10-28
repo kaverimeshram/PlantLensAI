@@ -23,6 +23,7 @@ import {
   Leaf,
   Flower2,
   HeartHandshake,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface IdentificationResultViewProps {
@@ -168,6 +169,22 @@ export const IdentificationResultView: React.FC<IdentificationResultViewProps> =
             </p>
             <p className="text-[11px] text-[#991B1B] font-semibold">
               Emergency Poison Hotline: US 1-800-222-1222 | India 1800-116-117 (AIIMS)
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* LOW CONFIDENCE UNCERTAINTY ALERT */}
+      {species.confidence < 60 && (
+        <div className="p-4 rounded-2xl bg-[#FFFBEB] border-2 border-[#FDE68A] shadow-xs flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-[#D97706] shrink-0 mt-0.5" />
+          <div className="space-y-1 text-xs text-[#92400E]">
+            <h4 className="font-bold text-sm uppercase tracking-wider text-[#B45309]">
+              Low Confidence Match ({species.confidence}%)
+            </h4>
+            <p className="leading-relaxed">
+              The visual evidence in this photograph is ambiguous or partially obscured. Key anatomical traits (leaf margins, flower anatomy, or venation) could not be verified with high certainty.
+              Please inspect the alternative candidates below, or retake a closer photograph in bright daylight.
             </p>
           </div>
         </div>

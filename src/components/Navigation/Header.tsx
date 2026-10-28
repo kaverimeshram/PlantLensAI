@@ -15,6 +15,7 @@ import {
   Sprout,
   Compass,
   MessageSquareQuote,
+  User,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -23,7 +24,16 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({ onOpenSettings, onOpenSafetyModal }) => {
-  const { userLocation, isDemoMode, activeTab, setActiveTab, setIsChatOpen } = usePlant();
+  const {
+    userLocation,
+    isDemoMode,
+    activeTab,
+    setActiveTab,
+    setIsChatOpen,
+    user,
+    setIsAuthModalOpen,
+    signOut,
+  } = usePlant();
 
   const navItems = [
     { id: 'home' as NavTab, label: 'Home', icon: Home },
@@ -64,6 +74,8 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSettings, onOpenSafetyModa
           return (
             <button
               key={item.id}
+              id={`nav-desktop-${item.id}`}
+              type="button"
               onClick={() => setActiveTab(item.id)}
               className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all duration-150 ${
                 isActive
@@ -127,8 +139,34 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSettings, onOpenSafetyModa
           )}
         </button>
 
+        {/* Account / Cloud Sync Button */}
+        <button
+          type="button"
+          onClick={() => {
+            if (user) {
+              if (confirm(`Signed in as ${user.email}. Do you want to sign out?`)) {
+                signOut();
+              }
+            } else {
+              setIsAuthModalOpen(true);
+            }
+          }}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${
+            user
+              ? 'bg-[#EDF4EB] text-[#183D32] border border-[#C8DBC4]'
+              : 'bg-[#FFFFFF] text-[#475850] hover:text-[#183D32] border border-[#183D32]/15 hover:bg-[#EDF4EB]'
+          }`}
+          title={user ? `Signed in as ${user.email}` : 'Sign In / Cloud Sync'}
+        >
+          <User className="w-3.5 h-3.5 text-[#183D32]" />
+          <span className="hidden md:inline">
+            {user ? (user.email?.split('@')[0] || 'Account') : 'Sign In'}
+          </span>
+        </button>
+
         {/* Mushroom & Toxic Safety Button */}
         <button
+          type="button"
           onClick={onOpenSafetyModal}
           className="p-2 rounded-full text-[#C2410C] bg-[#FEF2F2] hover:bg-[#FEE2E2] border border-[#FECACA] transition-colors"
           title="Mushroom & Toxic Safety Guidance"
@@ -139,6 +177,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSettings, onOpenSafetyModa
 
         {/* Settings button */}
         <button
+          type="button"
           onClick={onOpenSettings}
           className="p-2 rounded-full text-[#183D32] bg-[#FFFFFF] hover:bg-[#F1EBDD] border border-[#183D32]/10 transition-colors shadow-2xs"
           title="Settings & API Key"

@@ -45,27 +45,24 @@ export class PlantLensAiService implements PlantAiServiceInterface {
     multiplePlantCandidates?: Array<{ name: string; boundingBoxDesc: string }>;
     isDemoMode: boolean;
   }> {
-    try {
-      const response = await fetch('/api/ai/identify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          image: imageBase64,
-          intention: options?.intention || 'identify',
-          userApiKey: options?.userApiKey,
-          imageName: options?.imageName,
-        }),
-      });
+    const response = await fetch('/api/ai/identify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        image: imageBase64,
+        intention: options?.intention || 'identify',
+        userApiKey: options?.userApiKey,
+        imageName: options?.imageName,
+      }),
+    });
 
-      if (response.ok) {
-        const data = await response.json();
-        return data;
-      }
-    } catch {
-      // Fallback to client-side simulation if server is unreachable
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(errData.error || `Identification failed with status ${response.status}`);
     }
 
-    return this.getSimulatedIdentification(imageBase64, options?.imageName);
+    const data = await response.json();
+    return data;
   }
 
   async diagnosePlantHealth(
@@ -80,28 +77,25 @@ export class PlantLensAiService implements PlantAiServiceInterface {
     diagnosis: PlantDiagnosis;
     isDemoMode: boolean;
   }> {
-    try {
-      const response = await fetch('/api/ai/diagnose', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          image: imageBase64,
-          symptoms: options?.symptoms || [],
-          answers: options?.answers || {},
-          additionalImages: options?.additionalImages,
-          userApiKey: options?.userApiKey,
-        }),
-      });
+    const response = await fetch('/api/ai/diagnose', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        image: imageBase64,
+        symptoms: options?.symptoms || [],
+        answers: options?.answers || {},
+        additionalImages: options?.additionalImages,
+        userApiKey: options?.userApiKey,
+      }),
+    });
 
-      if (response.ok) {
-        const data = await response.json();
-        return data;
-      }
-    } catch {
-      // Fallback
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(errData.error || `Diagnostic triage failed with status ${response.status}`);
     }
 
-    return this.getSimulatedDiagnosis(imageBase64, options?.symptoms, options?.answers);
+    const data = await response.json();
+    return data;
   }
 
   async askAssistant(
@@ -112,29 +106,23 @@ export class PlantLensAiService implements PlantAiServiceInterface {
     reply: string;
     isDemoMode: boolean;
   }> {
-    try {
-      const response = await fetch('/api/ai/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages,
-          plantContext,
-          userApiKey,
-        }),
-      });
+    const response = await fetch('/api/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages,
+        plantContext,
+        userApiKey,
+      }),
+    });
 
-      if (response.ok) {
-        const data = await response.json();
-        return data;
-      }
-    } catch {
-      // Fallback
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(errData.error || `AI Botanist chat failed with status ${response.status}`);
     }
 
-    return {
-      reply: this.getSimulatedAssistantReply(messages[messages.length - 1]?.content || '', plantContext),
-      isDemoMode: true,
-    };
+    const data = await response.json();
+    return data;
   }
 
   private getSimulatedIdentification(imageBase64: string, imageName?: string) {
@@ -147,11 +135,9 @@ export class PlantLensAiService implements PlantAiServiceInterface {
     // Check for explicit non-plant test images
     if (
       identifier.includes('unrelated') ||
-      identifier.includes('car') ||
-      identifier.includes('laptop') ||
-      identifier.includes('chair') ||
       identifier.includes('non_plant') ||
-      identifier.includes('nonplant')
+      identifier.includes('nonplant') ||
+      /\b(car|vehicle|automobile|laptop|chair|furniture)\b/.test(identifier)
     ) {
       return {
         species: {

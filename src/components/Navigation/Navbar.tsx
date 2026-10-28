@@ -28,6 +28,8 @@ export const Navbar: React.FC = () => {
             return (
               <div key={item.id} className="relative -top-5">
                 <button
+                  id={`nav-mobile-${item.id}`}
+                  type="button"
                   onClick={() => setActiveTab('identify')}
                   className="w-14 h-14 rounded-full bg-[#183D32] text-[#F7F8F3] flex flex-col items-center justify-center shadow-xl border-4 border-[#F7F8F3] active:scale-95 transition-all focus:outline-none focus:ring-2 focus:ring-[#3A725D]"
                   aria-label="Scan Plant"
@@ -42,7 +44,9 @@ export const Navbar: React.FC = () => {
           return (
             <button
               key={item.id}
-              onClick={() => setActiveTab(item.id)}
+              id={`nav-mobile-${item.id}`}
+              type="button"
+              onClick={() => setActiveTab('identify' === item.id ? 'identify' : item.id)}
               className={`flex flex-col items-center justify-center py-1 px-2.5 rounded-xl transition-all ${
                 isActive ? 'text-[#183D32] font-bold' : 'text-[#73847B] hover:text-[#183D32]'
               }`}

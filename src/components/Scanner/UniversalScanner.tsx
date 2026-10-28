@@ -55,6 +55,7 @@ export const UniversalScanner: React.FC<UniversalScannerProps> = ({
   const [intention, setIntention] = useState<'identify' | 'health' | 'uses' | 'care'>(defaultIntention);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [currentPhaseIndex, setCurrentPhaseIndex] = useState(0);
 
   // Multi-plant detection state
@@ -194,6 +195,7 @@ export const UniversalScanner: React.FC<UniversalScannerProps> = ({
   const runIdentification = async () => {
     if (!selectedImage) return;
 
+    setAnalysisError(null);
     setScannerState('analyzing');
     setCurrentPhaseIndex(0);
 
@@ -222,9 +224,8 @@ export const UniversalScanner: React.FC<UniversalScannerProps> = ({
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error('Scan error:', msg);
-      // Fallback species on failure
-      const fallback = BOTANICAL_DATABASE[0];
-      onScanComplete(fallback);
+      setAnalysisError(msg);
+      setScannerState('preview');
     }
   };
 
@@ -233,6 +234,7 @@ export const UniversalScanner: React.FC<UniversalScannerProps> = ({
     setSelectedFileName(null);
     setDetectedMultiple(false);
     setMultiCandidates([]);
+    setAnalysisError(null);
     setScannerState('idle');
   };
 
@@ -279,11 +281,52 @@ export const UniversalScanner: React.FC<UniversalScannerProps> = ({
 
       {/* Camera Error Message if any */}
       {cameraError && (
-        <div className="p-4 rounded-xl bg-[#FEF2F2] border border-[#FECACA] flex items-start gap-3">
+        <div className="p-4 rounded-2xl bg-[#FEF2F2] border-2 border-[#FECACA] shadow-xs flex items-start gap-3">
           <AlertCircle className="w-5 h-5 text-[#DC2626] shrink-0 mt-0.5" />
-          <div className="text-xs text-[#991B1B] space-y-1">
-            <div className="font-bold">Camera Permission Notice</div>
-            <p>{cameraError}</p>
+          <div className="text-xs text-[#991B1B] space-y-2 flex-1">
+            <div className="font-bold text-sm">Camera Permission Notice</div>
+            <p className="leading-relaxed">{cameraError}</p>
+            <div className="pt-1">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="px-3.5 py-1.5 rounded-xl bg-[#DC2626] text-white font-bold text-xs hover:bg-[#B91C1C] transition-colors flex items-center gap-1.5 shadow-xs"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                <span>Upload From Photos / Files Instead</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Analysis Error Message if any */}
+      {analysisError && (
+        <div className="p-4 rounded-2xl bg-[#FEF2F2] border-2 border-[#FECACA] shadow-xs flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-[#DC2626] shrink-0 mt-0.5" />
+          <div className="text-xs text-[#991B1B] space-y-2 flex-1">
+            <div className="font-bold text-sm">Botanical Analysis Error</div>
+            <p className="leading-relaxed">{analysisError}</p>
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setAnalysisError(null);
+                  runIdentification();
+                }}
+                className="px-3.5 py-1.5 rounded-xl bg-[#DC2626] text-white font-bold text-xs hover:bg-[#B91C1C] transition-colors flex items-center gap-1.5 shadow-xs"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Try Again</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleRetake}
+                className="px-3.5 py-1.5 rounded-xl bg-white border border-[#FECACA] text-[#991B1B] font-semibold text-xs hover:bg-[#FEF2F2] transition-colors"
+              >
+                Select Another Image
+              </button>
+            </div>
           </div>
         </div>
       )}

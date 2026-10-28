@@ -128,8 +128,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 </button>
               )}
             </div>
-            <p className="text-[11px] text-[#73847B]">
-              Key is stored locally in your browser session and never sent to third-party tracking services. You can also configure <code className="bg-[#EDF4EB] px-1 py-0.5 rounded text-[#183D32]">GEMINI_API_KEY</code> in <code className="bg-[#EDF4EB] px-1 py-0.5 rounded text-[#183D32]">.env.local</code>.
+            <p className="text-[11px] text-[#73847B] leading-relaxed">
+              <strong>Production Best Practice:</strong> For production and Vercel deployments, configure <code className="bg-[#EDF4EB] px-1 py-0.5 rounded text-[#183D32]">GEMINI_API_KEY</code> as a server-side environment variable. Server keys remain confidential and never reach client JS bundles. Entering a personal key above is supported for developer testing and self-hosted instances.
             </p>
           </div>
 

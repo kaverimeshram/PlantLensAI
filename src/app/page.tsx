@@ -13,9 +13,10 @@ import { ExploreView } from '@/components/Explore/ExploreView';
 import { PlantAssistantChat } from '@/components/Chat/PlantAssistantChat';
 import { SettingsModal } from '@/components/Common/SettingsModal';
 import { SafetyWarningModal } from '@/components/Common/SafetyWarningModal';
+import { AuthModal } from '@/components/Auth/AuthModal';
 
 export default function App() {
-  const { activeTab, currentSpecies, setCurrentSpecies } = usePlant();
+  const { activeTab, currentSpecies, setCurrentSpecies, isAuthModalOpen, setIsAuthModalOpen } = usePlant();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSafetyOpen, setIsSafetyOpen] = useState(false);
 
@@ -70,6 +71,11 @@ export default function App() {
       <SafetyWarningModal
         isOpen={isSafetyOpen}
         onClose={() => setIsSafetyOpen(false)}
+      />
+
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
       />
     </div>
   );

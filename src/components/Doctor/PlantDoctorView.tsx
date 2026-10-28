@@ -64,6 +64,7 @@ export const PlantDoctorView: React.FC = () => {
   );
   const [selectedSymptoms, setSelectedSymptoms] = useState<string[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [diagnosticError, setDiagnosticError] = useState<string | null>(null);
   const [showTriageForm, setShowTriageForm] = useState(false);
 
   // Multi-angle photo attachments
@@ -118,6 +119,7 @@ export const PlantDoctorView: React.FC = () => {
   const runDiagnosis = async () => {
     if (!image) return;
 
+    setDiagnosticError(null);
     setIsAnalyzing(true);
     try {
       const result = await plantAiService.diagnosePlantHealth(image, {
@@ -132,8 +134,10 @@ export const PlantDoctorView: React.FC = () => {
       });
 
       setCurrentDiagnosis(result.diagnosis);
-    } catch (err) {
-      console.error('Diagnosis failed:', err);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('Diagnosis failed:', msg);
+      setDiagnosticError(msg);
     } finally {
       setIsAnalyzing(false);
     }
@@ -144,6 +148,7 @@ export const PlantDoctorView: React.FC = () => {
     setImage(null);
     setSelectedSymptoms([]);
     setShowTriageForm(false);
+    setDiagnosticError(null);
   };
 
   const handleSaveToPlantHistory = () => {
@@ -465,6 +470,37 @@ export const PlantDoctorView: React.FC = () => {
             )}
           </div>
 
+          {/* DIAGNOSTIC ERROR ALERT IF ANY */}
+          {diagnosticError && (
+            <div className="p-4 rounded-2xl bg-[#FEF2F2] border-2 border-[#FECACA] shadow-xs flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-[#DC2626] shrink-0 mt-0.5" />
+              <div className="text-xs text-[#991B1B] space-y-2 flex-1">
+                <div className="font-bold text-sm">Pathology Analysis Error</div>
+                <p className="leading-relaxed">{diagnosticError}</p>
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDiagnosticError(null);
+                      runDiagnosis();
+                    }}
+                    className="px-3.5 py-1.5 rounded-xl bg-[#DC2626] text-white font-bold text-xs hover:bg-[#B91C1C] transition-colors flex items-center gap-1.5 shadow-xs"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Try Again</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleReset}
+                    className="px-3.5 py-1.5 rounded-xl bg-white border border-[#FECACA] text-[#991B1B] font-semibold text-xs hover:bg-[#FEF2F2] transition-colors"
+                  >
+                    Change Photo
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* RUN DIAGNOSIS BUTTON */}
           <div className="flex justify-center">
             <button
@@ -488,6 +524,41 @@ export const PlantDoctorView: React.FC = () => {
                   <span>Diagnose Plant Health</span>
                 </>
               )}
+            </button>
+          </div>
+        </div>
+      ) : currentDiagnosis.isPlantOrganism === false || (currentDiagnosis.healthScore === 0 && (!currentDiagnosis.possibleCauses || currentDiagnosis.possibleCauses.length === 0)) ? (
+        /* NON-PLANT REJECTION SCREEN */
+        <div className="nature-card p-8 text-center space-y-6 max-w-2xl mx-auto">
+          <div className="w-16 h-16 rounded-3xl bg-[#FEF2F2] border border-[#FECACA] flex items-center justify-center mx-auto text-[#DC2626]">
+            <AlertTriangle className="w-8 h-8" />
+          </div>
+          <div className="space-y-2">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#FEF2F2] text-[#DC2626] text-xs font-bold uppercase tracking-wider">
+              Non-Plant Subject Detected
+            </div>
+            <h3 className="font-serif text-2xl font-bold text-[#183D32]">
+              No Plant Foliage Detected for Health Triage
+            </h3>
+            <p className="text-xs sm:text-sm text-[#475850] max-w-md mx-auto leading-relaxed">
+              {currentDiagnosis.insufficientEvidenceReason ||
+                'The uploaded image contains an object, vehicle, animal, or non-botanical subject. Plant Doctor requires a photograph of symptomatic foliage, stems, or roots.'}
+            </p>
+          </div>
+          {currentDiagnosis.imageUrl && (
+            <div className="w-44 h-44 mx-auto rounded-2xl overflow-hidden border border-[#183D32]/10 bg-stone-100">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={currentDiagnosis.imageUrl} alt="Non-plant upload" className="w-full h-full object-cover" />
+            </div>
+          )}
+          <div className="pt-2">
+            <button
+              type="button"
+              onClick={handleReset}
+              className="py-3 px-6 rounded-xl bg-[#183D32] text-[#F7F8F3] font-bold text-xs hover:bg-[#122E26] shadow-sm flex items-center gap-2 mx-auto"
+            >
+              <RotateCcw className="w-4 h-4" />
+              <span>Diagnose Another Photo</span>
             </button>
           </div>
         </div>

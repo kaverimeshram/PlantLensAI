@@ -1,37 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { checkRateLimit, validateImageInput, withTimeout } from '@/lib/serverSecurity';
+import {
+  checkRateLimit,
+  validateImageInput,
+  safeResolveImageBase64,
+  withTimeout,
+} from '@/lib/serverSecurity';
 
-// Helper to convert remote URL or data URL to clean base64 & mimeType
-async function resolveImageBase64(imageStr: string): Promise<{ base64Data: string; mimeType: string }> {
-  if (imageStr.startsWith('data:')) {
-    const parts = imageStr.split(';base64,');
-    const mimeType = parts[0].replace('data:', '') || 'image/jpeg';
-    const base64Data = parts[1] || '';
-    return { base64Data, mimeType };
-  }
-
-  if (imageStr.startsWith('http://') || imageStr.startsWith('https://')) {
-    const res = await withTimeout(fetch(imageStr), 10000, 'Image download');
-    if (!res.ok) {
-      throw new Error(`Failed to fetch image from URL: ${res.statusText}`);
-    }
-    const contentType = res.headers.get('content-type') || 'image/jpeg';
-    const arrayBuffer = await res.arrayBuffer();
-    const base64Data = Buffer.from(arrayBuffer).toString('base64');
-    return { base64Data, mimeType: contentType };
-  }
-
-  return { base64Data: imageStr, mimeType: 'image/jpeg' };
+// Sanitize error messages to ensure API keys are never leaked to clients or logs
+function sanitizeErrorMessage(error: unknown): string {
+  const msg = error instanceof Error ? error.message : String(error);
+  return msg
+    .replace(/AIza[0-9A-Za-z-_]{35}/g, '[REDACTED_KEY]')
+    .replace(/key=[^&\s]+/gi, 'key=[REDACTED]');
 }
 
 export async function POST(req: NextRequest) {
   try {
-    // 1. Rate limiting
+    // 1. Sliding window rate limiting per client IP (25 req/min)
     const rateLimit = checkRateLimit(req);
     if (!rateLimit.allowed) {
       return NextResponse.json(
-        { error: `Too many diagnostic requests. Please wait ${rateLimit.resetSeconds}s before diagnosing again.` },
+        {
+          error: `Rate limit reached. Please wait ${rateLimit.resetSeconds} seconds before requesting diagnosis.`,
+          retryAfter: rateLimit.resetSeconds,
+        },
         {
           status: 429,
           headers: {
@@ -43,96 +36,151 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const body = await req.json();
-    const { image, symptoms, answers, userApiKey } = body;
+    // 2. Parse and validate JSON request
+    let body: {
+      image?: string;
+      symptoms?: string[];
+      answers?: Record<string, string>;
+      userApiKey?: string;
+      imageName?: string;
+    };
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ error: 'Malformed JSON request body.' }, { status: 400 });
+    }
 
-    // 2. Validate input and payload size
+    const { image, symptoms, answers, userApiKey, imageName } = body;
+
+    // 3. Validate image format, size (15MB), and SSRF constraints
     const validation = validateImageInput(image);
-    if (!validation.valid) {
+    if (!validation.valid || !image) {
       return NextResponse.json({ error: validation.error }, { status: validation.statusCode || 400 });
     }
 
-    const apiKey = userApiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+    // 4. Resolve API key
+    const serverApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+    const apiKey = (serverApiKey && serverApiKey.trim().length > 10 && !serverApiKey.includes('your_gemini_api_key'))
+      ? serverApiKey
+      : (userApiKey && userApiKey.trim().length > 10)
+      ? userApiKey.trim()
+      : null;
 
-    if (apiKey && apiKey.length > 10) {
+    const isLiveMode = Boolean(apiKey);
+
+    // 5. LIVE AI MODE: Call Google Gemini Multimodal Vision
+    if (isLiveMode && apiKey) {
       try {
-        const { base64Data, mimeType } = await resolveImageBase64(image);
+        const { base64Data, mimeType } = await safeResolveImageBase64(image);
 
         const genAI = new GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+        const model = genAI.getGenerativeModel({
+          model: 'gemini-1.5-flash',
+          generationConfig: {
+            responseMimeType: 'application/json',
+          },
+        });
 
         const symptomsText = symptoms && symptoms.length > 0
           ? `User observed symptoms: ${symptoms.join(', ')}.`
-          : 'User did not pre-select symptoms; analyze visually from the image.';
+          : 'User did not pre-select symptoms; diagnose solely based on visible pathology in the image.';
 
         const answersText = answers && Object.keys(answers).length > 0
           ? `User care context: ${JSON.stringify(answers)}.`
           : 'Standard triage context.';
 
-        const prompt = `You are PlantLens AI Plant Doctor, a licensed plant pathologist and master horticulturist.
-Examine this photograph of an unhealthy or symptomatic plant.
-${symptomsText}
-${answersText}
+        const prompt = `You are PlantLens AI Plant Doctor, a licensed plant pathologist and horticultural diagnostician.
+Examine this photograph carefully.
 
-Analyze visible symptoms (chlorosis/yellowing, brown tips, wilting, leaf spots, holes/chewed margins, powdery mildew, mold, stunted growth, curling, stem/root rot, pests).
-Identify:
-1. Overall visual health: "healthy" | "mild_stress" | "moderate_issue" | "critical"
-2. Health score (0-100, where 100 is pristine). Never fabricate 100% certainty when symptoms are ambiguous.
-3. Observed symptoms list
-4. Possible causes ranked by likelihood % with visual evidence supporting each. Never guarantee a diagnosis without disclaimer.
-5. Actionable treatment plan: immediate actions, watering adjustments, light/temp adjustments, soil/drainage recommendations, organic pest management, fertilizer advice (with safety precautions against fertilizer burn), prevention tips, follow-up schedule
-6. 2-3 relevant follow-up questions to refine the diagnosis if needed
-7. If the evidence in the photo is blurry, partial, or insufficient to reach a certain diagnosis, set "insufficientEvidence": true, provide an "insufficientEvidenceReason", and list 2-4 specific items in "neededInformation" (e.g. close-up of leaf undersides, photo of pot drainage holes, check soil 2 inches down).
-
-Return ONLY a valid JSON object matching this schema (do NOT wrap in markdown backticks, just raw JSON):
+CRITICAL CHECK:
+First, verify whether this photo depicts a plant, leaves, stem, flowers, or roots.
+If the photo is NOT a botanical subject (e.g. it is a car, person, animal, gadget, furniture, or everyday object), you MUST return:
 {
-  "id": "diag-generated",
+  "isPlantOrganism": false,
+  "nonPlantDetectedReason": "The uploaded photograph does not contain plant foliage, stems, or roots. Plant Doctor requires an image of a symptomatic botanical specimen.",
+  "id": "diag-invalid",
   "scanDate": "${new Date().toISOString().split('T')[0]}",
-  "overallHealth": "mild_stress" | "moderate_issue" | "critical" | "healthy",
+  "overallHealth": "critical",
+  "healthScore": 0,
+  "plantIdentification": { "commonName": "No Plant Detected", "scientificName": "N/A" },
+  "observedSymptoms": ["Non-botanical subject"],
+  "possibleCauses": [],
+  "treatmentPlan": {
+    "immediateActions": ["Please photograph the affected leaf, stem, or pot of your plant."],
+    "wateringAdjustments": "N/A",
+    "lightTempAdjustments": "N/A",
+    "soilDrainageRecommendations": "N/A",
+    "pestManagement": "N/A",
+    "fertilizerAdvice": "N/A",
+    "preventionTips": [],
+    "followUpSchedule": "N/A"
+  },
+  "followUpQuestions": [],
+  "insufficientEvidence": true,
+  "insufficientEvidenceReason": "No plant organism was found in the image frame.",
+  "neededInformation": ["Clear photograph of the symptomatic plant foliage in daylight"],
+  "disclaimer": "Diagnostic triage requires an image of actual plant material."
+}
+
+If the image DOES depict a plant:
+1. Identify the likely plant species or family.
+2. Carefully inspect visible symptoms in the photo (chlorosis/yellowing, margin browning, wilting, leaf spots, powdery mildew, pest damage, root issues).
+3. Evaluate user symptoms: ${symptomsText}
+4. Care context: ${answersText}
+5. Assign overallHealth: "healthy" | "mild_stress" | "moderate_issue" | "critical" and realistic healthScore (0-100).
+6. Rank possible causes by likelihood %, providing specific visual evidence for each cause.
+7. Provide a detailed, safe treatment plan with actionable steps, avoiding dangerous over-fertilization of stressed plants.
+8. If evidence is ambiguous or incomplete, set "insufficientEvidence": true and detail "neededInformation".
+
+Return ONLY a valid JSON object matching this schema:
+{
+  "isPlantOrganism": true,
+  "id": "diag-id",
+  "scanDate": "${new Date().toISOString().split('T')[0]}",
+  "overallHealth": "healthy" | "mild_stress" | "moderate_issue" | "critical",
   "healthScore": 75,
   "plantIdentification": {
-    "commonName": "Likely Plant Name",
-    "scientificName": "Scientific name"
+    "commonName": "Common Plant Name",
+    "scientificName": "Genus species"
   },
-  "observedSymptoms": ["Yellowing lower leaves", "Brown leaf tips"],
+  "observedSymptoms": ["Symptom 1", "Symptom 2"],
   "possibleCauses": [
     {
-      "cause": "Primary cause (e.g. Overwatering & Poor Aeration)",
+      "cause": "Primary cause (e.g. Moisture Stress / Root Hypoxia)",
       "likelihood": 80,
-      "description": "Clear explanation of the pathological or physiological mechanism",
-      "visualEvidence": "Exact visual cues seen in the image"
+      "description": "Pathological or physiological mechanism",
+      "visualEvidence": "Exact visual cues observed in this photo"
     },
     {
       "cause": "Secondary differential cause",
       "likelihood": 35,
-      "description": "Why this could also explain some symptoms",
+      "description": "Why this is also considered",
       "visualEvidence": "Supporting visual detail"
     }
   ],
   "treatmentPlan": {
     "immediateActions": ["Action 1", "Action 2"],
     "wateringAdjustments": "Specific watering instructions",
-    "lightTempAdjustments": "Light and climate adjustments",
-    "soilDrainageRecommendations": "Soil and pot instructions",
-    "pestManagement": "Organic pest treatment if applicable, or preventive hygiene",
-    "fertilizerAdvice": "Careful fertilization guidance, avoiding over-feeding stressed plants",
-    "preventionTips": ["Prevention 1", "Prevention 2"],
-    "followUpSchedule": "When and how to re-check"
+    "lightTempAdjustments": "Lighting and microclimate guidance",
+    "soilDrainageRecommendations": "Potting medium and aeration steps",
+    "pestManagement": "Organic hygiene or pest protocol",
+    "fertilizerAdvice": "Safe fertilization guidance (caution against burning stressed roots)",
+    "preventionTips": ["Tip 1", "Tip 2"],
+    "followUpSchedule": "When and what to check next"
   },
   "followUpQuestions": [
     {
       "id": "q1",
-      "question": "Diagnostic question for the user",
+      "question": "Diagnostic question",
       "options": ["Option A", "Option B", "Option C"]
     }
   ],
   "insufficientEvidence": false,
   "insufficientEvidenceReason": "",
   "neededInformation": [],
-  "disclaimer": "Visual AI diagnosis is an advisory tool. Soil pathogens, viral infections, and microclimates may require physical laboratory testing."
+  "disclaimer": "Visual AI diagnosis is an advisory diagnostic tool. Soil testing and laboratory assays may be required for complex microbial pathologies."
 }`;
 
-        // 3. Execute with 25s timeout wrapper
         const result = await withTimeout(
           model.generateContent([
             prompt,
@@ -147,8 +195,13 @@ Return ONLY a valid JSON object matching this schema (do NOT wrap in markdown ba
           'Gemini Plant Pathology'
         );
 
-        const text = result.response.text().trim();
-        const cleanedJson = text.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim();
+        const responseText = result.response.text().trim();
+        const cleanedJson = responseText
+          .replace(/^```json\s*/i, '')
+          .replace(/^```\s*/i, '')
+          .replace(/```$/i, '')
+          .trim();
+
         const parsed = JSON.parse(cleanedJson);
 
         return NextResponse.json(
@@ -168,42 +221,124 @@ Return ONLY a valid JSON object matching this schema (do NOT wrap in markdown ba
           }
         );
       } catch (geminiError: unknown) {
-        const errorMsg = geminiError instanceof Error ? geminiError.message : String(geminiError);
-        console.warn('Gemini diagnose error, falling back to simulated diagnosis:', errorMsg);
+        const sanitizedMsg = sanitizeErrorMessage(geminiError);
+        console.error('Gemini diagnose API error:', sanitizedMsg);
+
+        // DO NOT silently fall through to fake demo data when live diagnosis failed
+        return NextResponse.json(
+          {
+            error: `Plant Doctor diagnostic analysis failed: ${sanitizedMsg}. Please check your connection or retry.`,
+            isDemoMode: false,
+            retryable: true,
+          },
+          { status: 502 }
+        );
       }
     }
 
-    // High quality demo fallback
-    const isOverwater = (answers && (answers['water_frequency']?.includes('Every day') || answers['soil_state']?.includes('Soggy')));
-    const hasYellowing = symptoms && symptoms.some((s: string) => s.toLowerCase().includes('yellow'));
-    const isMildew = image.includes('518709268805') || (symptoms && symptoms.some((s: string) => s.toLowerCase().includes('mildew')));
-    const isSpot = image.includes('592841200221') || (symptoms && symptoms.some((s: string) => s.toLowerCase().includes('spot')));
+    // 6. DEMO MODE
+    const identifier = (
+      (imageName ? String(imageName) : '') +
+      ' ' +
+      (image.startsWith('http') ? image : '')
+    ).toLowerCase();
 
-    let primaryCause = isOverwater ? 'Root Hypoxia / Overwatering Stress' : 'Subtle Moisture Inconsistency & Dry Air Stress';
+    const isExplicitNonPlant =
+      identifier.includes('unrelated') ||
+      identifier.includes('non_plant') ||
+      identifier.includes('nonplant') ||
+      /\b(car|vehicle|automobile|laptop|chair|furniture)\b/.test(identifier);
+
+    if (isExplicitNonPlant) {
+      return NextResponse.json({
+        diagnosis: {
+          id: 'diag-nonplant',
+          scanDate: new Date().toISOString().split('T')[0],
+          overallHealth: 'critical',
+          healthScore: 0,
+          plantIdentification: {
+            commonName: 'No Plant Detected',
+            scientificName: 'Non-botanical subject',
+          },
+          observedSymptoms: ['Non-botanical object detected in frame'],
+          possibleCauses: [],
+          treatmentPlan: {
+            immediateActions: [
+              'The uploaded photo appears to be a vehicle or non-plant object.',
+              'Please photograph plant foliage, stems, or leaves to diagnose plant health.',
+            ],
+            wateringAdjustments: 'N/A',
+            lightTempAdjustments: 'N/A',
+            soilDrainageRecommendations: 'N/A',
+            pestManagement: 'N/A',
+            fertilizerAdvice: 'N/A',
+            preventionTips: ['Photograph in bright daylight with the leaf filling most of the camera view.'],
+            followUpSchedule: 'N/A',
+          },
+          followUpQuestions: [],
+          insufficientEvidence: true,
+          insufficientEvidenceReason: 'The photograph contains a non-plant subject.',
+          neededInformation: ['A clear photo of symptomatic plant leaves, stems, or roots'],
+          imageUrl: image,
+          disclaimer: 'Plant Doctor requires an image of botanical material.',
+          isDemoMode: true,
+          isPlantOrganism: false,
+        },
+        isDemoMode: true,
+        demoNote: 'Running in demonstration mode: non-plant image rejected.',
+      });
+    }
+
+    const isOverwater = Boolean(
+      answers &&
+        (answers['water_frequency']?.includes('Every day') ||
+          answers['soil_state']?.includes('Soggy') ||
+          answers['soil_state']?.includes('damp'))
+    );
+    const hasYellowing =
+      identifier.includes('yellow') ||
+      (symptoms && symptoms.some((s: string) => s.toLowerCase().includes('yellow')));
+    const isMildew =
+      image.includes('518709268805') ||
+      identifier.includes('mildew') ||
+      (symptoms && symptoms.some((s: string) => s.toLowerCase().includes('mildew')));
+    const isSpot =
+      image.includes('592841200221') ||
+      identifier.includes('spot') ||
+      (symptoms && symptoms.some((s: string) => s.toLowerCase().includes('spot')));
+
+    let primaryCause = isOverwater
+      ? 'Root Hypoxia / Overwatering Stress'
+      : 'Subtle Moisture Inconsistency & Ambient Dry Air Stress';
     let primaryDesc = isOverwater
-      ? 'Soil stays saturated for too long, depriving delicate root hairs of oxygen and triggering lower leaf chlorosis.'
-      : 'Fluctuating moisture intervals combined with low ambient humidity cause premature cellular collapse in leaf tips.';
-    let visualEvidence = 'Pale yellowing starting on oldest leaves while main veins remain faintly green, with slight tip necrosis.';
+      ? 'Potting medium remains waterlogged, depriving roots of oxygen and triggering lower leaf chlorosis.'
+      : 'Fluctuating moisture intervals combined with low ambient humidity cause cellular stress in delicate leaf tips.';
+    let visualEvidence =
+      'Pale chlorotic yellowing on basal leaves while main veins remain faintly green, with softened tissue.';
     let healthScore = isOverwater ? 65 : 78;
-    let symptomsList = symptoms && symptoms.length > 0 ? symptoms : ['Yellowing foliage on lower nodes', 'Dry leaf edges'];
+    let symptomsList =
+      symptoms && symptoms.length > 0 ? symptoms : ['Yellowing foliage on lower nodes', 'Dry leaf edges'];
 
     if (isMildew) {
       primaryCause = 'Powdery Mildew Fungal Infection (*Podosphaera / Erysiphales*)';
-      primaryDesc = 'Airborne fungal spores germinate on foliage during periods of high ambient humidity and low air circulation, spreading a white powdery mycelial layer.';
+      primaryDesc =
+        'Airborne fungal spores germinate on foliage during periods of high humidity and low air circulation, forming a white powdery coating.';
       visualEvidence = 'Superficial white powdery talc-like patches on upper leaf surfaces and petioles.';
       healthScore = 62;
       symptomsList = ['White Powdery Substance', 'Curling or Cupping Leaves'];
     } else if (isSpot) {
       primaryCause = 'Early Leaf Spot / Septoria Fungus (*Septoria lycopersici*)';
-      primaryDesc = 'Fungal water-borne spores splash onto lower foliage from soil, causing circular necrotic lesions that spread upwards.';
-      visualEvidence = 'Circular brown spots with dark concentric margins and yellow halos on lower leaves.';
+      primaryDesc =
+        'Fungal water-borne spores splash onto lower foliage from wet soil, causing circular necrotic lesions that spread upwards.';
+      visualEvidence = 'Circular brown necrotic spots with dark concentric margins and yellow chlorotic halos.';
       healthScore = 58;
       symptomsList = ['Dark / Water-soaked Spots', 'Yellowing Leaves'];
     } else if (hasYellowing) {
       primaryCause = 'Chlorosis from Root Suffocation / Moisture Excess';
-      primaryDesc = 'Roots submerged in waterlogged potting medium cannot take up oxygen or iron, leading to breakdown of chloroplasts in older basal foliage.';
+      primaryDesc =
+        'Roots submerged in saturated potting medium cannot take up oxygen or iron, leading to breakdown of chloroplasts in older basal foliage.';
       visualEvidence = 'Pronounced uniform yellowing across basal leaves while apical growth remains green.';
-      healthScore = 70;
+      healthScore = 68;
     }
 
     return NextResponse.json({
@@ -213,7 +348,7 @@ Return ONLY a valid JSON object matching this schema (do NOT wrap in markdown ba
         overallHealth: healthScore >= 80 ? 'healthy' : healthScore >= 65 ? 'mild_stress' : 'moderate_issue',
         healthScore,
         plantIdentification: {
-          commonName: isSpot ? 'Tomato Plant' : isMildew ? 'Rose Plant' : 'Indoor Foliage Plant (Pothos / Aroid)',
+          commonName: isSpot ? 'Tomato Plant' : isMildew ? 'Rose Plant' : 'Indoor Houseplant (Aroid / Pothos)',
           scientificName: isSpot ? 'Solanum lycopersicum' : isMildew ? 'Rosa damascena' : 'Epipremnum aureum',
         },
         observedSymptoms: symptomsList,
@@ -227,8 +362,8 @@ Return ONLY a valid JSON object matching this schema (do NOT wrap in markdown ba
           {
             cause: 'Nitrogen Deficiency (Basal Leaf Chlorosis)',
             likelihood: 38,
-            description: 'Mobile nitrogen is mobilized from older foliage to support new apical growth when potting nutrients are depleted.',
-            visualEvidence: 'Gradual loss of rich emerald green across basal leaves.',
+            description: 'Mobile nitrogen is mobilized from older foliage to support new apical growth.',
+            visualEvidence: 'Gradual loss of emerald green across basal leaves.',
           },
           {
             cause: 'Harsh UV Light Scorch or Heat Stress',
@@ -239,49 +374,52 @@ Return ONLY a valid JSON object matching this schema (do NOT wrap in markdown ba
         ],
         treatmentPlan: {
           immediateActions: [
-            'Check pot drainage holes to ensure water is not pooled in the decorative outer pot or saucer.',
+            'Check pot drainage holes to ensure water is not pooled in the decorative saucer.',
             'Prune fully yellowed, dying leaves using sterile shears to redirect plant energy toward root recovery.',
             'Withhold additional water until the top 2 inches (5 cm) of soil dry out completely.',
           ],
-          wateringAdjustments: 'Water thoroughly only when the top half of the potting soil feels dry. Discard excess drained water after 15 minutes.',
-          lightTempAdjustments: 'Move to a position receiving bright, indirect sunlight. Keep away from cold drafts and direct air conditioner vents.',
-          soilDrainageRecommendations: 'If soil is heavy and dense, consider aerating with a wooden chopstick or repotting into a well-draining mix containing perlite and orchid bark.',
-          pestManagement: 'Wipe both sides of leaves with a damp cloth; check leaf undersides for fine webbing (spider mites) or tiny white specs.',
-          fertilizerAdvice: 'Never fertilize an actively stressed plant. Wait until new healthy leaves emerge before applying diluted balanced organic fertilizer.',
+          wateringAdjustments:
+            'Water thoroughly only when the top half of the potting soil feels dry. Discard excess drained water after 15 minutes.',
+          lightTempAdjustments:
+            'Move to a position receiving bright, indirect sunlight. Keep away from cold drafts and direct air conditioner vents.',
+          soilDrainageRecommendations:
+            'If soil is heavy and dense, aerate with a clean wooden chopstick or repot into an airy mix containing perlite and orchid bark.',
+          pestManagement:
+            'Wipe both sides of leaves with a damp microfiber cloth; check leaf undersides for fine webbing (spider mites) or scale.',
+          fertilizerAdvice:
+            'Never fertilize an actively stressed plant. Wait until new healthy leaves emerge before applying diluted balanced organic fertilizer.',
           preventionTips: [
-            'Always check soil moisture with your finger or a probe before watering.',
-            'Ensure all pots have bottom drainage holes.',
-            'Rotate plant 90 degrees every two weeks for balanced light distribution.',
+            'Always check soil moisture depth before watering.',
+            'Ensure the planter pot has functional drainage holes.',
           ],
-          followUpSchedule: 'Re-evaluate leaf firmness and soil moisture in 7 days.',
+          followUpSchedule: 'Re-inspect leaf firmness and soil moisture in 7 days.',
         },
         followUpQuestions: [
           {
             id: 'soil_moisture',
             question: 'How does the soil feel 2 inches below the surface right now?',
-            options: ['Bone dry and crumbly', 'Slightly cool and damp', 'Soggy / muddy waterlogged'],
+            options: ['Bone dry and dusty', 'Slightly cool and damp', 'Completely saturated / muddy'],
           },
           {
             id: 'pot_drainage',
-            question: 'Does your planter have drainage holes at the bottom?',
-            options: ['Yes, drains into a saucer', 'No drainage holes (sealed pot)', 'Unsure'],
+            question: 'Does the plant container have functional drainage holes at the bottom?',
+            options: ['Yes, water drains into a saucer', 'No, it is in a solid decorative pot without holes', 'Unsure'],
           },
         ],
         insufficientEvidence: false,
         insufficientEvidenceReason: '',
-        neededInformation: [
-          'Close-up photo of leaf undersides to check for spider mites or scale insects',
-          'Photo of root ball / drainage holes to assess root health',
-        ],
+        neededInformation: ['Close-up photo of leaf undersides', 'Photo of pot drainage holes'],
         imageUrl: image,
-        disclaimer: 'Visual AI assessments are diagnostic guides. Soil conditions, microclimates, and root health may affect outcomes.',
+        disclaimer:
+          'Visual AI health assessments are diagnostic aids. Environmental microclimates and soil microbiology affect actual outcomes.',
         isDemoMode: true,
       },
       isDemoMode: true,
-      demoNote: 'Running in demonstration mode. Add a GEMINI_API_KEY in Settings for live multimodal vision diagnostics.',
+      demoNote:
+        'Running in demonstration mode: no GEMINI_API_KEY detected. Connect an API key in Settings or server environment for live visual diagnostics.',
     });
-  } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : 'Failed to diagnose plant';
+  } catch (error: unknown) {
+    const errorMsg = sanitizeErrorMessage(error);
     console.error('Error in diagnose route:', errorMsg);
     return NextResponse.json({ error: errorMsg }, { status: 500 });
   }

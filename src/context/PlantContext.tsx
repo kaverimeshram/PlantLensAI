@@ -15,6 +15,9 @@ import {
   BOTANICAL_DATABASE,
 } from '@/data/botanicalData';
 
+import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import type { User as SupabaseUser } from '@supabase/supabase-js';
+
 export type NavTab = 'home' | 'identify' | 'doctor' | 'my-plants' | 'explore' | 'chat';
 
 interface PlantContextType {
@@ -66,6 +69,13 @@ interface PlantContextType {
   userLocation: string;
   setUserLocation: (loc: string) => void;
 
+  // Supabase Auth & Cloud Persistence
+  user: SupabaseUser | null;
+  isCloudSyncEnabled: boolean;
+  isAuthModalOpen: boolean;
+  setIsAuthModalOpen: (open: boolean) => void;
+  signOut: () => Promise<void>;
+
   // Quick navigation helpers
   startDiagnosisForSpecies: (species: PlantSpecies) => void;
   startChatForSpecies: (species: PlantSpecies) => void;
@@ -95,7 +105,37 @@ export const PlantProvider = ({ children }: { children: ReactNode }) => {
   const [isDemoMode, setIsDemoMode] = useState<boolean>(true);
   const [userLocation, setUserLocationState] = useState<string>('Maharashtra, India');
 
-  // Deferred hydration from localStorage to prevent React 19 cascading renders & lint errors
+  // Supabase Auth state
+  const [user, setUser] = useState<SupabaseUser | null>(null);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+
+  // Check server-side AI configuration and hydrate from local storage
+  useEffect(() => {
+    // 1. Query server AI status to automatically activate live vision if GEMINI_API_KEY is in environment
+    fetch('/api/ai/status')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.isConfigured) {
+          setIsDemoMode(false);
+        }
+      })
+      .catch(() => {});
+
+    // 2. Hydrate from Supabase auth if configured
+    if (supabase) {
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        setUser(session?.user ?? null);
+      });
+      const {
+        data: { subscription },
+      } = supabase.auth.onAuthStateChange((_event, session) => {
+        setUser(session?.user ?? null);
+      });
+      return () => subscription.unsubscribe();
+    }
+  }, []);
+
+  // Deferred hydration from localStorage for offline/local storage
   useEffect(() => {
     const timer = setTimeout(() => {
       try {
@@ -132,7 +172,14 @@ export const PlantProvider = ({ children }: { children: ReactNode }) => {
     return () => clearTimeout(timer);
   }, []);
 
-  // Save changes to localStorage
+  const signOut = async () => {
+    if (supabase) {
+      await supabase.auth.signOut();
+      setUser(null);
+    }
+  };
+
+  // Save changes to localStorage / state
   const setUserApiKey = (key: string) => {
     setUserApiKeyState(key);
     if (typeof window !== 'undefined') {
@@ -141,7 +188,13 @@ export const PlantProvider = ({ children }: { children: ReactNode }) => {
         setIsDemoMode(false);
       } else {
         localStorage.removeItem(LOCAL_STORAGE_KEYS.API_KEY);
-        setIsDemoMode(true);
+        // Only set demo mode if server also has no key
+        fetch('/api/ai/status')
+          .then((res) => res.json())
+          .then((data) => {
+            setIsDemoMode(!data.isConfigured);
+          })
+          .catch(() => setIsDemoMode(true));
       }
     }
   };
@@ -405,6 +458,11 @@ export const PlantProvider = ({ children }: { children: ReactNode }) => {
         setIsDemoMode,
         userLocation,
         setUserLocation,
+        user,
+        isCloudSyncEnabled: isSupabaseConfigured,
+        isAuthModalOpen,
+        setIsAuthModalOpen,
+        signOut,
         startDiagnosisForSpecies,
         startChatForSpecies,
       }}
